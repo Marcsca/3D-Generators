@@ -1,0 +1,2222 @@
+<!DOCTYPE html>
+<html lang="it" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Maker Studio - Live Preview Suite</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <!-- Leaflet CSS & JS per il selettore Mappa 2D -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Import Map per Three.js e Addons (incluso SVGLoader) -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <style>
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #111827; }
+    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #4b5563; }
+    input[type="range"] { accent-color: #3b82f6; }
+    .leaflet-container { background: #0f172a; font-family: inherit; }
+  </style>
+</head>
+<body class="bg-gray-950 text-gray-100 font-sans h-screen flex flex-col overflow-hidden select-none">
+
+  <!-- TOP NAVBAR CON SELETTORE GENERATORI SEMPRE VISIBILE -->
+  <header class="h-16 border-b border-gray-800 bg-gray-900/95 backdrop-blur px-5 flex items-center justify-between gap-4 z-30 shrink-0">
+    <div class="flex items-center gap-3 shrink-0">
+      <div class="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-600/30">
+        <i data-lucide="box" class="w-5 h-5 text-white"></i>
+      </div>
+      <div>
+        <h1 class="font-bold text-base tracking-tight leading-none">3D Maker <span class="text-blue-500">Studio</span></h1>
+        <p class="text-[11px] text-gray-400 mt-0.5">Anteprima 3D Sempre Attiva</p>
+      </div>
+    </div>
+
+    <!-- TABS GENERATORI (Passaggio istantaneo senza mai chiudere l'anteprima 3D) -->
+    <nav id="top-generator-tabs" class="flex items-center gap-2 overflow-x-auto py-1"></nav>
+
+    <!-- Info Dimensioni Live -->
+    <div class="hidden xl:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-gray-800/80 border border-gray-700 text-xs shrink-0">
+      <i data-lucide="ruler" class="w-4 h-4 text-blue-400"></i>
+      <span class="text-gray-400">Ingombro:</span>
+      <span id="ws-bbox-info" class="font-mono font-semibold text-white">-- × -- × -- mm</span>
+    </div>
+  </header>
+
+  <!-- WORKSPACE UNICO SEMPRE ATTIVO (Sidebar Controlli + Anteprima 3D + Split-Map Opzionale) -->
+  <main class="flex-1 flex overflow-hidden relative">
+    
+    <!-- SIDEBAR PARAMETRI -->
+    <aside class="w-80 lg:w-96 border-r border-gray-800 bg-gray-900 flex flex-col shrink-0 z-20">
+      <div class="p-4 border-b border-gray-800 flex items-center justify-between bg-gray-900/50">
+        <div>
+          <span class="text-[10px] font-semibold uppercase tracking-wider text-blue-400" id="ws-tool-category">Categoria</span>
+          <h2 class="text-sm font-bold text-white leading-tight" id="ws-tool-title">Titolo Tool</h2>
+        </div>
+        <button id="btn-reset-params" title="Ripristina valori predefiniti" class="px-2.5 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs text-gray-300 flex items-center gap-1.5 transition">
+          <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
+          Reset
+        </button>
+      </div>
+
+      <!-- Controlli dinamici del Tool -->
+      <div id="ws-controls-container" class="flex-1 overflow-y-auto p-4 space-y-3.5"></div>
+
+      <!-- Footer Esportazione -->
+      <div class="p-4 border-t border-gray-800 bg-gray-900/95 space-y-2">
+        <button id="btn-export-stl" class="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs flex items-center justify-center gap-2 shadow-lg shadow-blue-600/25 transition">
+          <i data-lucide="download" class="w-4 h-4"></i>
+          Esporta STL Unico (Monoblocco)
+        </button>
+
+        <button id="btn-export-multicolor" class="hidden w-full py-2.5 px-4 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 font-semibold text-xs items-center justify-center gap-2 transition">
+          <i data-lucide="layers" class="w-4 h-4"></i>
+          Esporta STL Separati per Colore (AMS/MMU)
+        </button>
+      </div>
+    </aside>
+
+    <!-- AREA CENTRALE: ANTEPRIMA 3D SEMPRE VISIBILE + SPLIT VIEW MAPPA 2D -->
+    <section class="flex-1 flex overflow-hidden relative">
+      
+      <!-- VIEWPORT 3D (Non viene mai nascosto) -->
+      <div class="flex-1 relative bg-gradient-to-b from-gray-900 to-gray-950 overflow-hidden" id="viewport-container">
+        <!-- Overlay Stato e Comandi Mouse -->
+        <div class="absolute top-4 left-4 z-10 flex flex-wrap gap-2 pointer-events-none">
+          <div class="px-3 py-1.5 rounded-lg bg-gray-900/85 backdrop-blur border border-gray-800 text-xs text-gray-300 flex items-center gap-2">
+            <i data-lucide="mouse" class="w-3.5 h-3.5 text-blue-400"></i>
+            <span>Ruota: SX | Pan: DX | Zoom: Rotella</span>
+          </div>
+          <div id="status-badge" class="px-3 py-1.5 rounded-lg bg-blue-950/90 border border-blue-700/60 text-xs text-blue-300 flex items-center gap-2">
+            <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+            <span id="status-badge-label">Anteprima Live Attiva</span>
+          </div>
+        </div>
+
+        <!-- Bottoni rapidi telecamera (Vista Frontale / Alto / Isometrica) -->
+        <div class="absolute bottom-4 right-4 z-10 flex items-center gap-2">
+          <button id="btn-view-top" class="px-3 py-2 rounded-lg bg-gray-900/85 hover:bg-gray-800 border border-gray-700 text-xs text-gray-200 flex items-center gap-1.5 backdrop-blur transition">
+            <i data-lucide="compass" class="w-3.5 h-3.5 text-emerald-400"></i>
+            Vista Dall'Alto
+          </button>
+          <button id="btn-reset-camera" class="px-3 py-2 rounded-lg bg-gray-900/85 hover:bg-gray-800 border border-gray-700 text-xs text-gray-200 flex items-center gap-1.5 backdrop-blur transition">
+            <i data-lucide="focus" class="w-3.5 h-3.5 text-blue-400"></i>
+            Vista 3D Iso
+          </button>
+        </div>
+      </div>
+
+      <!-- PANNELLO MAPPA 2D IN SPLIT-VIEW (Affiancato al 3D, non copre mai l'anteprima!) -->
+      <div id="map-picker-drawer" class="hidden w-[440px] xl:w-[500px] border-l border-gray-800 bg-gray-900 flex-col shrink-0 z-20">
+        <div class="p-3.5 border-b border-gray-800 flex items-center justify-between bg-gray-900">
+          <div class="flex items-center gap-2">
+            <i data-lucide="map-pin" class="w-4 h-4 text-blue-400"></i>
+            <span class="font-bold text-xs text-white">Selettore Mappa 2D (Split-View Live)</span>
+          </div>
+          <button id="btn-close-map-modal" class="p-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white">
+            <i data-lucide="x" class="w-4 h-4"></i>
+          </button>
+        </div>
+
+        <div class="p-2.5 border-b border-gray-800 flex gap-2 bg-gray-900/60">
+          <input type="text" id="map-search-input" placeholder="Cerca città o monte (es. Torino, Cervino)..." 
+            class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500" />
+          <button id="btn-map-search" class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs font-medium text-gray-200">
+            Cerca
+          </button>
+        </div>
+
+        <div class="flex-1 relative overflow-hidden">
+          <div id="leaflet-map" class="w-full h-full z-10"></div>
+          <div class="absolute inset-0 z-20 pointer-events-none flex items-center justify-center">
+            <div id="map-crop-frame" class="w-56 h-56 border-2 border-blue-400 bg-blue-500/10 shadow-[0_0_0_9999px_rgba(3,7,18,0.65)] transition-all duration-200 flex items-end justify-center pb-1.5">
+              <span class="px-2 py-0.5 rounded bg-gray-900/90 text-[10px] font-mono text-blue-300 border border-blue-500/30">
+                Area 3D
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div class="p-3.5 border-t border-gray-800 bg-gray-900 space-y-2">
+          <div class="text-[11px] text-gray-400" id="osm-fetch-status">
+            Inquadra la zona e clicca su "Aggiorna Modello 3D" per importarla a sinistra.
+          </div>
+          <div class="flex gap-2">
+            <button id="btn-load-demo-city" class="px-3 py-2 rounded-xl bg-gray-800 hover:bg-gray-700 text-xs font-semibold text-gray-300">
+              Demo Collina
+            </button>
+            <button id="btn-fetch-osm-data" class="flex-1 py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white flex items-center justify-center gap-1.5 shadow-lg shadow-blue-600/30">
+              <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+              Aggiorna Modello 3D da Mappa
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </section>
+  </main>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { STLExporter } from 'three/addons/exporters/STLExporter.js';
+    import { FontLoader } from 'three/addons/loaders/FontLoader.js';
+    import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
+    import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
+    import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
+
+    // ============================================================================
+    // 0. UTILITY DI FUSIONE GEOMETRIE SICURA (Evita conflitti UV / Index in Three.js)
+    // ============================================================================
+    function safeMergeGeometries(geoList) {
+      if (!geoList || geoList.length === 0) return null;
+      const cleanedList = [];
+      for (const g of geoList) {
+        if (!g) continue;
+        const nonIndexed = g.index ? g.toNonIndexed() : g.clone();
+        const pos = nonIndexed.getAttribute('position');
+        if (!pos || pos.count === 0) continue;
+        const cleanGeo = new THREE.BufferGeometry();
+        cleanGeo.setAttribute('position', pos);
+        cleanGeo.computeVertexNormals();
+        cleanedList.push(cleanGeo);
+      }
+      if (cleanedList.length === 0) return null;
+      if (cleanedList.length === 1) return cleanedList[0];
+      const merged = BufferGeometryUtils.mergeGeometries(cleanedList, false);
+      if (merged) merged.computeVertexNormals();
+      return merged;
+    }
+
+    // ============================================================================
+    // 1. MOTORE GRAFICO PER PORTACHIAVI (Icone Vettoriali, SVG Loader e Raster-to-3D)
+    // ============================================================================
+    const PRESET_SVGS = {
+      rocket: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="M50 6 C65 22 72 44 72 64 L88 78 L84 85 L68 78 L62 84 L38 84 L32 78 L16 85 L12 78 L28 64 C28 44 35 22 50 6 Z M40 87 L60 87 L50 97 Z"/></svg>`,
+      star: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><polygon points="50,6 63,35 95,38 71,59 78,91 50,74 22,91 29,59 5,38 37,35"/></svg>`,
+      heart: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="M50 88 C50 88 12 62 12 34 C12 19 24 10 37 10 C45 10 50 16 50 22 C50 16 55 10 63 10 C76 10 88 19 88 34 C88 62 50 88 50 88 Z"/></svg>`,
+      bolt: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><polygon points="58,6 20,54 48,54 40,94 82,44 52,44"/></svg>`,
+      shield: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="M50 8 L86 22 L86 50 C86 72 50 92 50 92 C50 92 14 72 14 50 L14 22 Z"/></svg>`,
+      crown: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><polygon points="10,78 18,28 38,52 50,20 62,52 82,28 90,78"/></svg>`,
+      paw: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="24" cy="36" r="9"/><circle cx="41" cy="24" r="9"/><circle cx="59" cy="24" r="9"/><circle cx="76" cy="36" r="9"/><path d="M50 42 C32 42 22 56 26 70 C29 80 40 82 50 82 C60 82 71 80 74 70 C78 56 68 42 50 42 Z"/></svg>`,
+      gamepad: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="M24 28 L76 28 C88 28 94 42 90 66 C87 78 75 80 67 68 L59 58 L41 58 L33 68 C25 80 13 78 10 66 C6 42 12 28 24 28 Z"/></svg>`
+    };
+
+    class KeychainGraphicEngine {
+      // Disegna l'anteprima 2D dell'SVG sul mini-canvas laterale
+      static renderSVGToPreviewCanvas(svgText, previewCanvas) {
+        if (!previewCanvas || !svgText) return;
+        const ctx = previewCanvas.getContext('2d');
+        const blob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        img.onload = () => {
+          previewCanvas.width = 64;
+          previewCanvas.height = 64;
+          ctx.fillStyle = '#111827';
+          ctx.fillRect(0, 0, 64, 64);
+          ctx.drawImage(img, 6, 6, 52, 52);
+          URL.revokeObjectURL(url);
+        };
+        img.src = url;
+      }
+
+      // Converte una stringa SVG in una BufferGeometry 3D solida con normali corrette (senza scale negativa!)
+      static buildSVGGeometry(svgText, targetSizeMm, extrudeHeightMm, previewCanvas) {
+        try {
+          if (previewCanvas) this.renderSVGToPreviewCanvas(svgText, previewCanvas);
+
+          const loader = new SVGLoader();
+          const svgData = loader.parse(svgText);
+          const geos = [];
+
+          svgData.paths.forEach(path => {
+            let shapes = SVGLoader.createShapes(path);
+            if ((!shapes || shapes.length === 0) && path.toShapes) {
+              shapes = path.toShapes(true);
+            }
+            shapes.forEach(shape => {
+              const g = new THREE.ExtrudeGeometry(shape, {
+                depth: extrudeHeightMm,
+                bevelEnabled: false,
+                curveSegments: 18
+              });
+              geos.push(g);
+            });
+          });
+
+          if (geos.length === 0) return null;
+          const merged = safeMergeGeometries(geos);
+          if (!merged) return null;
+
+          // Ruotiamo di +90° attorno a X (determinante +1: NON inverte le facce!).
+          // Così X resta a destra, Y dell'SVG (verso il basso) diventa +Z (frontale), e l'estrusione va lungo Y!
+          merged.rotateX(Math.PI / 2);
+          merged.computeBoundingBox();
+
+          const bb = merged.boundingBox;
+          const w = Math.max(0.001, bb.max.x - bb.min.x);
+          const d = Math.max(0.001, bb.max.z - bb.min.z);
+          const cx = (bb.max.x + bb.min.x) / 2;
+          const cz = (bb.max.z + bb.min.z) / 2;
+
+          // Centriamo in X e Z, portando la base inferiore esattamente a Y=0
+          merged.translate(-cx, -bb.min.y, -cz);
+
+          const scaleFactor = targetSizeMm / Math.max(w, d);
+          merged.scale(scaleFactor, 1, scaleFactor);
+          merged.computeVertexNormals();
+          return {
+            geometry: merged,
+            widthMm: w * scaleFactor,
+            heightMm: d * scaleFactor
+          };
+        } catch (e) {
+          console.warn('Errore parsing SVG:', e);
+          return null;
+        }
+      }
+
+      // Converte un'immagine PNG/JPG in una Mesh 3D solida tramite Run-Length Voxelizer + disegna l'anteprima 2D
+      static buildRasterImageGeometry(imgElement, res, threshold, invert, targetSizeMm, extrudeHeightMm, previewCanvas) {
+        if (!imgElement) return null;
+        const canvas = document.createElement('canvas');
+        const aspect = imgElement.width / Math.max(1, imgElement.height);
+        const gridW = aspect >= 1 ? res : Math.max(12, Math.round(res * aspect));
+        const gridH = aspect >= 1 ? Math.max(12, Math.round(res / aspect)) : res;
+
+        canvas.width = gridW;
+        canvas.height = gridH;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(imgElement, 0, 0, gridW, gridH);
+        const imgData = ctx.getImageData(0, 0, gridW, gridH).data;
+
+        if (previewCanvas) {
+          previewCanvas.width = gridW;
+          previewCanvas.height = gridH;
+          const pCtx = previewCanvas.getContext('2d');
+          const pData = pCtx.createImageData(gridW, gridH);
+          for (let i = 0; i < imgData.length; i += 4) {
+            const alpha = imgData[i + 3];
+            const lum = 0.299 * imgData[i] + 0.587 * imgData[i + 1] + 0.114 * imgData[i + 2];
+            const isSolid = alpha > 64 && (invert ? (lum > threshold) : (lum < threshold));
+            pData.data[i] = isSolid ? 59 : 17;
+            pData.data[i + 1] = isSolid ? 130 : 24;
+            pData.data[i + 2] = isSolid ? 246 : 39;
+            pData.data[i + 3] = 255;
+          }
+          pCtx.putImageData(pData, 0, 0);
+        }
+
+        const totalW = aspect >= 1 ? targetSizeMm : targetSizeMm * aspect;
+        const totalD = aspect >= 1 ? targetSizeMm / aspect : targetSizeMm;
+        const cellW = totalW / gridW;
+        const cellD = totalD / gridH;
+
+        const boxes = [];
+        for (let y = 0; y < gridH; y++) {
+          let runStart = -1;
+          for (let x = 0; x <= gridW; x++) {
+            let isSolid = false;
+            if (x < gridW) {
+              const idx = (y * gridW + x) * 4;
+              const alpha = imgData[idx + 3];
+              const lum = 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
+              isSolid = alpha > 64 && (invert ? (lum > threshold) : (lum < threshold));
+            }
+
+            if (isSolid && runStart === -1) {
+              runStart = x;
+            } else if (!isSolid && runStart !== -1) {
+              const runLen = x - runStart;
+              const boxW = runLen * cellW + 0.04;
+              const boxD = cellD + 0.04;
+              const cx = -totalW / 2 + (runStart + runLen / 2) * cellW;
+              const cz = -totalD / 2 + (y + 0.5) * cellD;
+
+              const bGeo = new THREE.BoxGeometry(boxW, extrudeHeightMm, boxD);
+              bGeo.translate(cx, extrudeHeightMm / 2, cz);
+              boxes.push(bGeo);
+              runStart = -1;
+            }
+          }
+        }
+
+        if (boxes.length === 0) return null;
+        const merged = safeMergeGeometries(boxes);
+        if (!merged) return null;
+        return {
+          geometry: merged,
+          widthMm: totalW,
+          heightMm: totalD
+        };
+      }
+
+      // Costruisce una riga di testo 3D con controllo millimetrico dello spazio tra ogni singola lettera
+      static buildSpacedTextLine(str, font, sizeMm, extrudeHeightMm, letterSpacingMm) {
+        if (!str || !font) return null;
+        const charGeos = [];
+        let cursorX = 0;
+
+        for (let i = 0; i < str.length; i++) {
+          const ch = str[i];
+          if (ch === ' ') {
+            cursorX += sizeMm * 0.42 + letterSpacingMm;
+            continue;
+          }
+          const cGeo = new TextGeometry(ch, {
+            font: font,
+            size: sizeMm,
+            height: extrudeHeightMm,
+            curveSegments: 6,
+            bevelEnabled: false
+          });
+          cGeo.computeBoundingBox();
+          const bb = cGeo.boundingBox;
+          const charW = Math.max(sizeMm * 0.2, bb.max.x - bb.min.x);
+
+          cGeo.translate(cursorX - bb.min.x, 0, 0);
+          charGeos.push(cGeo);
+          cursorX += charW + letterSpacingMm;
+        }
+
+        if (charGeos.length === 0) return null;
+        const lineGeo = safeMergeGeometries(charGeos);
+        if (!lineGeo) return null;
+        lineGeo.rotateX(-Math.PI / 2);
+        lineGeo.computeBoundingBox();
+
+        const bb = lineGeo.boundingBox;
+        const w = bb.max.x - bb.min.x;
+        const d = bb.max.z - bb.min.z;
+        const cx = (bb.max.x + bb.min.x) / 2;
+        const cz = (bb.max.z + bb.min.z) / 2;
+
+        // Centra la riga attorno a (0,0) e poggia esattamente su Y=0
+        lineGeo.translate(-cx, -bb.min.y, -cz);
+        return { geometry: lineGeo, widthMm: w, heightMm: d };
+      }
+    }
+
+    // ============================================================================
+    // 2. MOTORE AUDIO (Per Generatore Soundwave)
+    // ============================================================================
+    class AudioWaveformProcessor {
+      static generateDemoPeaks(count = 60) {
+        const peaks = [];
+        for (let i = 0; i < count; i++) {
+          const t = i / (count - 1);
+          const envelope = Math.sin(t * Math.PI);
+          const wave = Math.abs(Math.sin(i * 0.45) * 0.6 + Math.cos(i * 1.1) * 0.4);
+          peaks.push(Math.max(0.08, Math.min(1.0, wave * envelope * 1.15)));
+        }
+        return peaks;
+      }
+
+      static computePeaksFromChannelData(rawData, numBars) {
+        const blockSize = Math.floor(rawData.length / numBars);
+        const peaks = [];
+        let maxPeak = 0.0001;
+        for (let i = 0; i < numBars; i++) {
+          const start = i * blockSize;
+          let sum = 0;
+          for (let j = 0; j < blockSize; j++) {
+            const val = Math.abs(rawData[start + j] || 0);
+            if (val > sum) sum = val;
+          }
+          peaks.push(sum);
+          if (sum > maxPeak) maxPeak = sum;
+        }
+        return peaks.map(p => p / maxPeak);
+      }
+    }
+
+    // ============================================================================
+    // 3. MOTORE CARTGRAFICO 3D + ALTIMETRIA DEM
+    // ============================================================================
+    class Map3DEngine {
+      static generateDemoElevationGrid(gridN = 12) {
+        const values = [];
+        for (let iz = 0; iz < gridN; iz++) {
+          const row = [];
+          const nz = (iz / (gridN - 1)) - 0.5;
+          for (let ix = 0; ix < gridN; ix++) {
+            const nx = (ix / (gridN - 1)) - 0.5;
+            let h = 230;
+            if (nx > -0.05) {
+              const hillFactor = Math.pow((nx + 0.05) / 0.55, 1.6);
+              h += hillFactor * 165 * (0.75 + 0.25 * Math.sin(nz * 5.0));
+            }
+            const riverDist = Math.abs(nz - (-0.20 + nx * 0.18));
+            if (riverDist < 0.12) h -= (0.12 - riverDist) * 70;
+            row.push(h);
+          }
+          values.push(row);
+        }
+        return { gridN, values, minElev: 222, maxElev: 395 };
+      }
+
+      static generateDemoCityData() {
+        const buildings = [], parks = [], water = [], roads = [];
+        water.push([
+          [-0.5, -0.28], [-0.2, -0.22], [0.1, -0.30], [0.5, -0.18],
+          [0.5, -0.04], [0.1, -0.16], [-0.2, -0.08], [-0.5, -0.14]
+        ]);
+        parks.push([[-0.16, 0.02], [0.16, 0.02], [0.16, 0.24], [-0.16, 0.24]]);
+        parks.push([[-0.42, -0.44], [-0.18, -0.44], [-0.18, -0.32], [-0.42, -0.32]]);
+
+        [-0.34, -0.18, 0.0, 0.18, 0.34].forEach((x, idx) => {
+          const pts = [];
+          for (let s = 0; s <= 16; s++) pts.push([x, -0.48 + (s / 16) * 0.96]);
+          roads.push({ type: idx === 2 ? 'primary' : 'secondary', points: pts });
+        });
+        [-0.32, 0.0, 0.26].forEach((y, idx) => {
+          const pts = [];
+          for (let s = 0; s <= 16; s++) pts.push([-0.48 + (s / 16) * 0.96, y]);
+          roads.push({ type: idx === 1 ? 'primary' : 'secondary', points: pts });
+        });
+
+        const blocksX = [[-0.45, -0.37], [-0.31, -0.21], [-0.15, -0.03], [0.03, 0.15], [0.21, 0.31], [0.37, 0.45]];
+        const blocksY = [[-0.45, -0.35], [0.03, 0.23], [0.29, 0.44]];
+        blocksX.forEach(([x1, x2], xi) => {
+          blocksY.forEach(([y1, y2], yi) => {
+            if ((yi === 1 && (xi === 2 || xi === 3)) || (yi === 0 && (xi === 0 || xi === 1))) return;
+            const midY = (y1 + y2) / 2;
+            const dist = Math.hypot((x1 + x2) / 2, (y1 + y2) / 2);
+            buildings.push({ heightMeters: 6 + Math.round((1 - dist) * 22) + ((xi * 7 + yi * 3) % 9), footprint: [[x1, y1], [x2, y1], [x2, midY - 0.01], [x1, midY - 0.01]] });
+            buildings.push({ heightMeters: 5 + Math.round((1 - dist) * 18) + ((xi * 5 + yi * 11) % 7), footprint: [[x1, midY + 0.01], [x2, midY + 0.01], [x2, y2], [x1, y2]] });
+          });
+        });
+
+        return {
+          buildings, parks, water, roads,
+          elevationGrid: this.generateDemoElevationGrid(12),
+          sourceName: 'Torino & Collina (Demo)',
+          coordsLabel: '45.070° N, 7.687° E'
+        };
+      }
+
+      static async fetchRealElevationGrid(bounds, gridN = 10) {
+        try {
+          const s = bounds.getSouth(), w = bounds.getWest(), n = bounds.getNorth(), e = bounds.getEast();
+          const lats = [], lons = [];
+          for (let iz = 0; iz < gridN; iz++) {
+            const lat = s + (iz / (gridN - 1)) * (n - s);
+            for (let ix = 0; ix < gridN; ix++) {
+              const lon = w + (ix / (gridN - 1)) * (e - w);
+              lats.push(lat.toFixed(5));
+              lons.push(lon.toFixed(5));
+            }
+          }
+          const res = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lats.join(',')}&longitude=${lons.join(',')}`);
+          const data = await res.json();
+          const values = [];
+          let minElev = Infinity, maxElev = -Infinity;
+          for (let iz = 0; iz < gridN; iz++) {
+            const row = [];
+            for (let ix = 0; ix < gridN; ix++) {
+              const val = data.elevation[iz * gridN + ix];
+              row.push(val);
+              if (val < minElev) minElev = val;
+              if (val > maxElev) maxElev = val;
+            }
+            values.push(row);
+          }
+          return { gridN, values, minElev, maxElev };
+        } catch {
+          return this.generateDemoElevationGrid(10);
+        }
+      }
+
+      static sampleTerrainReliefMm(nx, nz, elevationGrid, terrainMode, exaggeration, maxReliefMm) {
+        if (terrainMode === 'flat') return 0;
+        if (terrainMode === 'synthetic-hill') {
+          const hill = Math.max(0, (nx + 0.15) * 1.1) * (0.65 + 0.35 * Math.sin(nz * 4.5));
+          const wave = Math.sin((nx + 0.5) * Math.PI) * Math.cos((nz * 1.5)) * 0.25;
+          return Math.max(0, (hill + wave) * maxReliefMm * exaggeration * 0.5);
+        }
+        if (!elevationGrid || !elevationGrid.values) return 0;
+        const { gridN, values, minElev, maxElev } = elevationGrid;
+        const deltaMeters = Math.max(1, maxElev - minElev);
+        const u = Math.max(0, Math.min(1, nx + 0.5)) * (gridN - 1);
+        const v = Math.max(0, Math.min(1, nz + 0.5)) * (gridN - 1);
+        const x0 = Math.floor(u), z0 = Math.floor(v);
+        const x1 = Math.min(gridN - 1, x0 + 1), z1 = Math.min(gridN - 1, z0 + 1);
+        const tx = u - x0, tz = v - z0;
+        const h0 = values[z0][x0] * (1 - tx) + values[z0][x1] * tx;
+        const h1 = values[z1][x0] * (1 - tx) + values[z1][x1] * tx;
+        const elevMeters = h0 * (1 - tz) + h1 * tz;
+        return Math.max(0, ((elevMeters - minElev) / Math.max(35, deltaMeters)) * maxReliefMm * exaggeration);
+      }
+
+      static buildSolidTerrainMesh(sizeX, sizeZ, baseH, shapeType, segs, getReliefFn) {
+        const positions = [], indices = [];
+        const clampToBoundary = (nx, nz) => {
+          if (shapeType === 'circle') {
+            const r = Math.hypot(nx, nz);
+            if (r > 0.5) return [(nx / r) * 0.5, (nz / r) * 0.5];
+          } else if (shapeType === 'hexagon') {
+            const angle = Math.atan2(nz, nx), r = Math.hypot(nx, nz);
+            const sector = ((angle % (Math.PI / 3)) + (Math.PI / 3)) % (Math.PI / 3);
+            const maxR = 0.5 * (Math.sqrt(3) / 2) / Math.cos(sector - Math.PI / 6);
+            if (r > maxR) return [Math.cos(angle) * maxR, Math.sin(angle) * maxR];
+          }
+          return [nx, nz];
+        };
+
+        const rowStride = segs + 1;
+        for (let iz = 0; iz <= segs; iz++) {
+          const rawNz = (iz / segs) - 0.5;
+          for (let ix = 0; ix <= segs; ix++) {
+            const rawNx = (ix / segs) - 0.5;
+            const [nx, nz] = clampToBoundary(rawNx, rawNz);
+            positions.push(nx * sizeX, baseH + getReliefFn(nx, nz), -nz * sizeZ);
+          }
+        }
+        const bottomOffset = (segs + 1) * (segs + 1);
+        for (let iz = 0; iz <= segs; iz++) {
+          const rawNz = (iz / segs) - 0.5;
+          for (let ix = 0; ix <= segs; ix++) {
+            const rawNx = (ix / segs) - 0.5;
+            const [nx, nz] = clampToBoundary(rawNx, rawNz);
+            positions.push(nx * sizeX, 0, -nz * sizeZ);
+          }
+        }
+        for (let iz = 0; iz < segs; iz++) {
+          for (let ix = 0; ix < segs; ix++) {
+            const a = iz * rowStride + ix, b = a + 1, c = (iz + 1) * rowStride + ix, d = c + 1;
+            indices.push(a, b, d, a, d, c);
+            const ba = bottomOffset + a, bb = bottomOffset + b, bc = bottomOffset + c, bd = bottomOffset + d;
+            indices.push(ba, bd, bb, ba, bc, bd);
+          }
+        }
+        for (let ix = 0; ix < segs; ix++) {
+          const t1 = ix, t2 = ix + 1, b1 = bottomOffset + t1, b2 = bottomOffset + t2;
+          indices.push(t1, b1, b2, t1, b2, t2);
+          const tn1 = segs * rowStride + ix + 1, tn2 = segs * rowStride + ix, bn1 = bottomOffset + tn1, bn2 = bottomOffset + tn2;
+          indices.push(tn1, bn1, bn2, tn1, bn2, tn2);
+        }
+        for (let iz = 0; iz < segs; iz++) {
+          const t1 = (iz + 1) * rowStride, t2 = iz * rowStride, b1 = bottomOffset + t1, b2 = bottomOffset + t2;
+          indices.push(t1, b1, b2, t1, b2, t2);
+          const te1 = iz * rowStride + segs, te2 = (iz + 1) * rowStride + segs, be1 = bottomOffset + te1, be2 = bottomOffset + te2;
+          indices.push(te1, be1, be2, te1, be2, te2);
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        geo.setIndex(indices);
+        geo.computeVertexNormals();
+        return geo.toNonIndexed();
+      }
+
+      static async fetchOSMData(bounds) {
+        const s = bounds.getSouth(), w = bounds.getWest(), n = bounds.getNorth(), e = bounds.getEast();
+        const bboxStr = `${s},${w},${n},${e}`;
+        const query = `[out:json][timeout:25];(way["building"](${bboxStr});way["highway"~"^(motorway|trunk|primary|secondary|tertiary|residential|pedestrian|living_street|unclassified|service)$"](${bboxStr});way["leisure"~"^(park|garden|pitch)$"](${bboxStr});way["landuse"~"^(grass|forest|meadow|recreation_ground)$"](${bboxStr});way["natural"="water"](${bboxStr});way["waterway"="riverbank"](${bboxStr}););out body;>;out skel qt;`;
+
+        const [osmResponse, elevationGrid] = await Promise.all([
+          fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: query }),
+          this.fetchRealElevationGrid(bounds, 10)
+        ]);
+        if (!osmResponse.ok) throw new Error('Overpass API error');
+        const json = await osmResponse.json();
+        const nodes = new Map();
+        json.elements.forEach(el => { if (el.type === 'node') nodes.set(el.id, [el.lon, el.lat]); });
+
+        const centerLon = (w + e) / 2, centerLat = (s + n) / 2, spanLon = e - w, spanLat = n - s;
+        const normCoord = (lon, lat) => [(lon - centerLon) / spanLon, (lat - centerLat) / spanLat];
+        const buildings = [], parks = [], water = [], roads = [];
+
+        json.elements.forEach(el => {
+          if (el.type !== 'way' || !el.nodes || !el.tags) return;
+          const pts = el.nodes.map(id => nodes.get(id)).filter(Boolean).map(([lon, lat]) => normCoord(lon, lat));
+          if (pts.length < 2) return;
+          const tags = el.tags;
+          if (tags.building && pts.length >= 3) {
+            let h = 7 + (el.id % 5) * 2.5;
+            if (tags.height && !isNaN(parseFloat(tags.height))) h = parseFloat(tags.height);
+            else if (tags['building:levels'] && !isNaN(parseFloat(tags['building:levels']))) h = parseFloat(tags['building:levels']) * 3.2;
+            buildings.push({ heightMeters: h, footprint: pts });
+          } else if ((tags.leisure || tags.landuse) && pts.length >= 3) parks.push(pts);
+          else if ((tags.natural === 'water' || tags.waterway) && pts.length >= 3) water.push(pts);
+          else if (tags.highway) {
+            const hw = tags.highway;
+            let roadType = 'residential';
+            if (['motorway', 'trunk', 'primary'].includes(hw)) roadType = 'primary';
+            else if (['secondary', 'tertiary'].includes(hw)) roadType = 'secondary';
+            else if (['service', 'pedestrian', 'living_street'].includes(hw)) roadType = 'minor';
+            roads.push({ type: roadType, points: pts });
+          }
+        });
+
+        const coordsLabel = `${Math.abs(centerLat).toFixed(3)}° ${centerLat >= 0 ? 'N' : 'S'}, ${Math.abs(centerLon).toFixed(3)}° ${centerLon >= 0 ? 'E' : 'W'}`;
+        return { buildings, parks, water, roads, elevationGrid, sourceName: `OSM (${coordsLabel})`, coordsLabel };
+      }
+
+      static isPointInsideShape(nx, nz, shapeType, marginFactor = 0.97) {
+        const x = nx / marginFactor, z = nz / marginFactor;
+        if (shapeType === 'circle') return (x * x + z * z) <= 0.25;
+        if (shapeType === 'hexagon') {
+          const qx = Math.abs(x), qz = Math.abs(z);
+          return qz <= 0.433 && (qx * 0.866 + qz * 0.5) <= 0.433;
+        }
+        return Math.abs(x) <= 0.5 && Math.abs(z) <= 0.5;
+      }
+    }
+
+    // ============================================================================
+    // 4. REGISTRO COMPLETO DEI GENERATORI
+    // ============================================================================
+    const GENERATORS = [
+      // --------------------------------------------------------------------------
+      // GENERATORE 1: PORTACHIAVI & BADGE STUDIO PRO (Completo di SVG, PNG/JPG, 5 Font, Fori)
+      // --------------------------------------------------------------------------
+      {
+        id: 'keychain-tag',
+        title: 'Portachiavi & Badge Studio Pro',
+        category: 'Everyday Carry & Branding',
+        icon: 'key-round',
+        status: 'ready',
+        supportsMultiColorExport: true,
+        defaultParams: {
+          contentMode: 'combo',        // 'combo', 'text-only', 'graphic-only'
+          graphicLayout: 'left',       // 'left', 'right', 'top', 'bottom', 'free'
+          
+          // Sorgente Logo / Grafica
+          graphicSource: 'preset',     // 'preset', 'svg-upload', 'raster-upload'
+          presetIcon: 'rocket',
+          graphicSizeMm: 18,
+          graphicReliefMm: 1.6,
+          graphicGapMm: 4.5,
+          graphicOffsetX: 0,
+          graphicOffsetY: 0,
+          rasterThreshold: 140,
+          rasterInvert: false,
+          rasterResolution: 56,
+
+          // Testo e Tipografia
+          textLine1: 'MARCO',
+          textLine2: 'MAKER 3D',
+          fontName: 'helvetiker_bold',
+          fontSize1: 10.5,
+          fontSize2: 5.5,
+          letterSpacing: 0.8,
+          lineSpacing: 2.8,
+          textReliefMm: 1.6,
+          textStyleMode: 'relief',     // 'relief' (sopra base) o 'flush-inlay' (a filo per stampa faccia in giù)
+          textOffsetX: 0,
+          textOffsetY: 0,
+
+          // Forma e Dimensioni Piastra Base
+          plateShape: 'auto-pill',     // 'auto-pill', 'auto-rect', 'rounded-rect', 'pill', 'circle', 'hexagon', 'shield', 'dog-tag'
+          plateWidth: 78,
+          plateHeight: 32,
+          plateThickness: 3.0,
+          cornerRadius: 6.0,
+          autoMarginX: 8.0,
+          autoMarginY: 6.0,
+
+          // Bordo Perimetrale a Rilievo
+          hasBorderRim: true,
+          borderWidth: 2.0,
+          borderReliefMm: 1.2,
+
+          // Foro / Anello Portachiavi
+          holeStyle: 'outer-tab',      // 'outer-tab', 'inner-hole', 'dual-ears', 'none'
+          holePosition: 'left',        // 'left', 'top', 'top-left', 'right'
+          holeDiameter: 4.5,
+          holeRimWidth: 2.8,
+          holeOffsetMm: 0.0,
+
+          // Palette Colori (4 Canali AMS/MMU)
+          colorBase: '#1e293b',
+          colorBorder: '#3b82f6',
+          colorText: '#f8fafc',
+          colorGraphic: '#f59e0b'
+        },
+        schema: [
+          { type: 'header', label: '1. Modalità Contenuto & Layout' },
+          { type: 'select', key: 'contentMode', label: 'Elementi sul Portachiavi', options: [
+            { value: 'combo', label: 'Combinato (Logo/SVG/Immagine + Testo Custom)' },
+            { value: 'text-only', label: 'Solo Testo Custom (1 o 2 righe)' },
+            { value: 'graphic-only', label: 'Solo Logo / SVG / Immagine' }
+          ]},
+          { type: 'select', key: 'graphicLayout', label: 'Disposizione Logo + Testo', options: [
+            { value: 'left', label: 'Logo a Sinistra + Testo a Destra' },
+            { value: 'right', label: 'Testo a Sinistra + Logo a Destra' },
+            { value: 'top', label: 'Logo in Alto + Testo Sotto' },
+            { value: 'bottom', label: 'Testo in Alto + Logo Sotto' },
+            { value: 'free', label: 'Posizionamento Manuale Libero (Offset X/Y)' }
+          ]},
+
+          { type: 'header', label: '2. Testo Custom & Tipografia 3D' },
+          { type: 'text', key: 'textLine1', label: 'Testo Principale (Riga 1)', placeholder: 'Scrivi testo riga 1...' },
+          { type: 'text', key: 'textLine2', label: 'Sottotitolo (Riga 2 - lascia vuoto per 1 riga)', placeholder: 'Opzionale...' },
+          { type: 'select', key: 'fontName', label: 'Stile Carattere (Font 3D)', options: [
+            { value: 'helvetiker_bold', label: 'Helvetiker Bold (Sans-Serif Solido)' },
+            { value: 'helvetiker_regular', label: 'Helvetiker Regular (Pulito)' },
+            { value: 'optimer_bold', label: 'Optimer Bold (Geometrico)' },
+            { value: 'gentilis_bold', label: 'Gentilis Bold (Elegante Serif)' },
+            { value: 'droid_sans_bold', label: 'Droid Sans Bold (Tecnico Moderno)' }
+          ]},
+          { type: 'range', key: 'fontSize1', label: 'Grandezza Testo Riga 1', min: 4, max: 28, step: 0.5, unit: 'mm' },
+          { type: 'range', key: 'fontSize2', label: 'Grandezza Testo Riga 2', min: 3, max: 20, step: 0.5, unit: 'mm' },
+          { type: 'range', key: 'letterSpacing', label: 'Spaziatura tra Lettere (Tracking)', min: 0.0, max: 6.0, step: 0.2, unit: 'mm' },
+          { type: 'range', key: 'lineSpacing', label: 'Spaziatura tra Riga 1 e Riga 2', min: 1.0, max: 10.0, step: 0.2, unit: 'mm' },
+          { type: 'select', key: 'textStyleMode', label: 'Modalità Rilievo Testo', options: [
+            { value: 'relief', label: 'In Rilievo Sopra la Base (Classico)' },
+            { value: 'flush-inlay', label: 'Intarsio a Filo (Per stampa faccia in giù con AMS)' }
+          ]},
+          { type: 'range', key: 'textReliefMm', label: 'Altezza Estrusione Testo (Z)', min: 0.6, max: 4.0, step: 0.2, unit: 'mm' },
+          { type: 'range', key: 'textOffsetX', label: 'Spostamento Fine Testo X', min: -30, max: 30, step: 0.5, unit: 'mm' },
+          { type: 'range', key: 'textOffsetY', label: 'Spostamento Fine Testo Y', min: -20, max: 20, step: 0.5, unit: 'mm' },
+
+          { type: 'header', label: '3. Immagine, File SVG o Icona 3D' },
+          { type: 'keychain-graphic-uploader', label: 'Carica File .SVG o Immagine (.PNG/.JPG)' },
+          { type: 'select', key: 'presetIcon', label: 'Oppure scegli Icona Vettoriale Pronta', options: [
+            { value: 'rocket', label: 'Razzo Aerospaziale' },
+            { value: 'star', label: 'Stella 5 Punte' },
+            { value: 'heart', label: 'Cuore' },
+            { value: 'bolt', label: 'Fulmine / Energia' },
+            { value: 'shield', label: 'Scudo' },
+            { value: 'crown', label: 'Corona' },
+            { value: 'paw', label: 'Zampa Animale' },
+            { value: 'gamepad', label: 'Controller Gaming' }
+          ]},
+          { type: 'range', key: 'graphicSizeMm', label: 'Dimensione Logo / Immagine', min: 6, max: 65, step: 1, unit: 'mm' },
+          { type: 'range', key: 'graphicReliefMm', label: 'Altezza Estrusione Logo (Z)', min: 0.6, max: 4.5, step: 0.2, unit: 'mm' },
+          { type: 'range', key: 'graphicGapMm', label: 'Distanza tra Logo e Testo', min: 1, max: 18, step: 0.5, unit: 'mm' },
+          { type: 'range', key: 'rasterThreshold', label: 'Soglia Contrasto Immagine PNG/JPG', min: 20, max: 235, step: 5, unit: '' },
+          { type: 'checkbox', key: 'rasterInvert', label: 'Inverti Chiaro/Scuro Immagine' },
+          { type: 'range', key: 'graphicOffsetX', label: 'Spostamento Fine Logo X', min: -35, max: 35, step: 0.5, unit: 'mm' },
+          { type: 'range', key: 'graphicOffsetY', label: 'Spostamento Fine Logo Y', min: -25, max: 25, step: 0.5, unit: 'mm' },
+
+          { type: 'header', label: '4. Forma Piastra & Bordo a Rilievo' },
+          { type: 'select', key: 'plateShape', label: 'Forma Geometrica Piastra', options: [
+            { value: 'auto-pill', label: 'Capsula Smart Auto-Fit (Si adatta al contenuto)' },
+            { value: 'auto-rect', label: 'Rettangolo Smussato Smart Auto-Fit' },
+            { value: 'rounded-rect', label: 'Rettangolo Smussato (Misure Manuali)' },
+            { value: 'pill', label: 'Capsula / Pillola (Misure Manuali)' },
+            { value: 'circle', label: 'Medaglione Circolare' },
+            { value: 'hexagon', label: 'Esagono Geometrico' },
+            { value: 'shield', label: 'Scudo / Crest' },
+            { value: 'dog-tag', label: 'Piastrina Militare Smussata' }
+          ]},
+          { type: 'range', key: 'autoMarginX', label: 'Margine Orizzontale Auto-Fit', min: 3, max: 22, step: 0.5, unit: 'mm' },
+          { type: 'range', key: 'autoMarginY', label: 'Margine Verticale Auto-Fit', min: 3, max: 18, step: 0.5, unit: 'mm' },
+          { type: 'range', key: 'plateWidth', label: 'Larghezza Piastra Manuale (X)', min: 25, max: 160, step: 1, unit: 'mm' },
+          { type: 'range', key: 'plateHeight', label: 'Altezza Piastra Manuale (Y)', min: 15, max: 120, step: 1, unit: 'mm' },
+          { type: 'range', key: 'plateThickness', label: 'Spessore Base Portachiavi (Z)', min: 1.6, max: 6.0, step: 0.2, unit: 'mm' },
+          { type: 'range', key: 'cornerRadius', label: 'Raggio Smusso Angoli', min: 1, max: 25, step: 0.5, unit: 'mm' },
+          { type: 'checkbox', key: 'hasBorderRim', label: 'Aggiungi Bordo Perimetrale a Rilievo' },
+          { type: 'range', key: 'borderWidth', label: 'Spessore Bordo a Rilievo', min: 1.0, max: 5.0, step: 0.2, unit: 'mm' },
+          { type: 'range', key: 'borderReliefMm', label: 'Altezza Rilievo Bordo (Z)', min: 0.4, max: 3.5, step: 0.2, unit: 'mm' },
+
+          { type: 'header', label: '5. Foro / Anello Attacco Chiavi' },
+          { type: 'select', key: 'holeStyle', label: 'Tipo di Attacco Portachiavi', options: [
+            { value: 'outer-tab', label: 'Anello Sporgente Esterno (Rinforzato)' },
+            { value: 'inner-hole', label: 'Foro Passante Interno alla Piastra' },
+            { value: 'dual-ears', label: 'Doppio Anello SX + DX (Targhetta / Bracciale)' },
+            { value: 'none', label: 'Nessun Foro (Targhetta / Calamita)' }
+          ]},
+          { type: 'select', key: 'holePosition', label: 'Posizione Anello / Foro', options: [
+            { value: 'left', label: 'Sul Lato Sinistro (Classico Orizzontale)' },
+            { value: 'top', label: 'In Alto al Centro (Medaglione Verticale)' },
+            { value: 'top-left', label: 'Nell\'Angolo in Alto a Sinistra' },
+            { value: 'right', label: 'Sul Lato Destro' }
+          ]},
+          { type: 'range', key: 'holeDiameter', label: 'Diametro Interno Foro', min: 2.5, max: 10.0, step: 0.5, unit: 'mm' },
+          { type: 'range', key: 'holeRimWidth', label: 'Spessore Parete Anello', min: 1.8, max: 5.5, step: 0.2, unit: 'mm' },
+          { type: 'range', key: 'holeOffsetMm', label: 'Offset Sporgenza Anello', min: -3.0, max: 5.0, step: 0.5, unit: 'mm' },
+
+          { type: 'header', label: '6. Palette Colori (AMS / Multicolore)' },
+          { type: 'color', key: 'colorBase', label: 'Colore 1: Base Portachiavi' },
+          { type: 'color', key: 'colorBorder', label: 'Colore 2: Bordo & Anello' },
+          { type: 'color', key: 'colorText', label: 'Colore 3: Testo Custom 3D' },
+          { type: 'color', key: 'colorGraphic', label: 'Colore 4: Logo / SVG / Immagine' }
+        ],
+
+        buildGeometry: (params, state) => {
+          const group = new THREE.Group();
+          const baseH = Number(params.plateThickness);
+          const textRelief = Number(params.textReliefMm);
+          const graphicRelief = Number(params.graphicReliefMm);
+          const isFlushInlay = params.textStyleMode === 'flush-inlay';
+
+          const parts = {
+            base: [],
+            border: [],
+            text: [],
+            graphic: []
+          };
+
+          const activeFont = state.fonts[params.fontName] || state.loadedFont;
+
+          // 1. COSTRUZIONE BLOCCO TESTO (1 o 2 Righe con Letter Spacing custom)
+          let textBlockGeo = null;
+          let textW = 0, textD = 0;
+
+          if (params.contentMode !== 'graphic-only' && activeFont) {
+            const line1Str = (params.textLine1 || '').trim();
+            const line2Str = (params.textLine2 || '').trim();
+            // In modalità rilievo estraiamo esattamente textRelief (senza compenetrare le pareti), in intarsio 0.6mm
+            const extrudeT = isFlushInlay ? 0.6 : textRelief;
+
+            const l1 = KeychainGraphicEngine.buildSpacedTextLine(line1Str, activeFont, Number(params.fontSize1), extrudeT, Number(params.letterSpacing));
+            const l2 = KeychainGraphicEngine.buildSpacedTextLine(line2Str, activeFont, Number(params.fontSize2), extrudeT, Number(params.letterSpacing));
+
+            if (l1 && l2) {
+              const gapZ = Number(params.lineSpacing);
+              const totalD = l1.heightMm + gapZ + l2.heightMm;
+              l1.geometry.translate(0, 0, -totalD / 2 + l1.heightMm / 2);
+              l2.geometry.translate(0, 0, totalD / 2 - l2.heightMm / 2);
+              textBlockGeo = safeMergeGeometries([l1.geometry, l2.geometry]);
+              textW = Math.max(l1.widthMm, l2.widthMm);
+              textD = totalD;
+            } else if (l1) {
+              textBlockGeo = l1.geometry;
+              textW = l1.widthMm;
+              textD = l1.heightMm;
+            } else if (l2) {
+              textBlockGeo = l2.geometry;
+              textW = l2.widthMm;
+              textD = l2.heightMm;
+            }
+          }
+
+          // 2. COSTRUZIONE BLOCCO GRAFICO (SVG Upload, Raster Image Upload, oppure Icona Preset)
+          let graphicBlockGeo = null;
+          let graphW = 0, graphD = 0;
+
+          if (params.contentMode !== 'text-only') {
+            const gSize = Number(params.graphicSizeMm);
+            const extrudeG = isFlushInlay ? 0.6 : graphicRelief;
+            const previewCanvas = document.getElementById('raster-preview-canvas');
+            let gRes = null;
+
+            if (params.graphicSource === 'svg-upload' && state.customSvgText) {
+              gRes = KeychainGraphicEngine.buildSVGGeometry(state.customSvgText, gSize, extrudeG, previewCanvas);
+            } else if (params.graphicSource === 'raster-upload' && state.customRasterImage) {
+              gRes = KeychainGraphicEngine.buildRasterImageGeometry(
+                state.customRasterImage,
+                Number(params.rasterResolution),
+                Number(params.rasterThreshold),
+                Boolean(params.rasterInvert),
+                gSize,
+                extrudeG,
+                previewCanvas
+              );
+            } else {
+              const svgMarkup = PRESET_SVGS[params.presetIcon] || PRESET_SVGS.rocket;
+              gRes = KeychainGraphicEngine.buildSVGGeometry(svgMarkup, gSize, extrudeG, previewCanvas);
+            }
+
+            if (gRes) {
+              graphicBlockGeo = gRes.geometry;
+              graphW = gRes.widthMm;
+              graphD = gRes.heightMm;
+            }
+          }
+
+          // 3. CALCOLO LAYOUT COMBINATO (Logo + Testo) E POSIZIONAMENTO PULITO SU Y = baseH
+          const gap = Number(params.graphicGapMm);
+          let contentSpanX = 20, contentSpanZ = 14;
+
+          // Poggia esattamente sopra la superficie della piastra (Y = baseH) evitando compenetrazioni
+          const yElevationText = isFlushInlay ? (baseH - 0.58) : baseH;
+          const yElevationGraphic = isFlushInlay ? (baseH - 0.58) : baseH;
+
+          // Se c'è un foro interno, spostiamo leggermente il contenuto per non sovrapporlo al foro
+          const holeTotalSpan = Number(params.holeDiameter) + Number(params.holeRimWidth) * 2;
+          const innerHoleShiftX = (params.holeStyle === 'inner-hole' && params.holePosition === 'left')
+            ? (holeTotalSpan * 0.45)
+            : (params.holeStyle === 'inner-hole' && params.holePosition === 'right')
+              ? (-holeTotalSpan * 0.45)
+              : 0;
+          const innerHoleShiftZ = (params.holeStyle === 'inner-hole' && params.holePosition === 'top')
+            ? (holeTotalSpan * 0.45)
+            : 0;
+
+          if (textBlockGeo && graphicBlockGeo) {
+            const layout = params.graphicLayout;
+            if (layout === 'left') {
+              contentSpanX = graphW + gap + textW;
+              contentSpanZ = Math.max(graphD, textD);
+              const gx = -contentSpanX / 2 + graphW / 2 + Number(params.graphicOffsetX) + innerHoleShiftX;
+              const tx = contentSpanX / 2 - textW / 2 + Number(params.textOffsetX) + innerHoleShiftX;
+              graphicBlockGeo.translate(gx, yElevationGraphic, -Number(params.graphicOffsetY) + innerHoleShiftZ);
+              textBlockGeo.translate(tx, yElevationText, -Number(params.textOffsetY) + innerHoleShiftZ);
+            } else if (layout === 'right') {
+              contentSpanX = textW + gap + graphW;
+              contentSpanZ = Math.max(graphD, textD);
+              const tx = -contentSpanX / 2 + textW / 2 + Number(params.textOffsetX) + innerHoleShiftX;
+              const gx = contentSpanX / 2 - graphW / 2 + Number(params.graphicOffsetX) + innerHoleShiftX;
+              textBlockGeo.translate(tx, yElevationText, -Number(params.textOffsetY) + innerHoleShiftZ);
+              graphicBlockGeo.translate(gx, yElevationGraphic, -Number(params.graphicOffsetY) + innerHoleShiftZ);
+            } else if (layout === 'top') {
+              contentSpanX = Math.max(graphW, textW);
+              contentSpanZ = graphD + gap + textD;
+              const gz = -contentSpanZ / 2 + graphD / 2 - Number(params.graphicOffsetY) + innerHoleShiftZ;
+              const tz = contentSpanZ / 2 - textD / 2 - Number(params.textOffsetY) + innerHoleShiftZ;
+              graphicBlockGeo.translate(Number(params.graphicOffsetX) + innerHoleShiftX, yElevationGraphic, gz);
+              textBlockGeo.translate(Number(params.textOffsetX) + innerHoleShiftX, yElevationText, tz);
+            } else if (layout === 'bottom') {
+              contentSpanX = Math.max(graphW, textW);
+              contentSpanZ = textD + gap + graphD;
+              const tz = -contentSpanZ / 2 + textD / 2 - Number(params.textOffsetY) + innerHoleShiftZ;
+              const gz = contentSpanZ / 2 - graphD / 2 - Number(params.graphicOffsetY) + innerHoleShiftZ;
+              textBlockGeo.translate(Number(params.textOffsetX) + innerHoleShiftX, yElevationText, tz);
+              graphicBlockGeo.translate(Number(params.graphicOffsetX) + innerHoleShiftX, yElevationGraphic, gz);
+            } else {
+              contentSpanX = Math.max(graphW, textW) + 10;
+              contentSpanZ = Math.max(graphD, textD) + 6;
+              graphicBlockGeo.translate(Number(params.graphicOffsetX), yElevationGraphic, -Number(params.graphicOffsetY));
+              textBlockGeo.translate(Number(params.textOffsetX), yElevationText, -Number(params.textOffsetY));
+            }
+            parts.graphic.push(graphicBlockGeo);
+            parts.text.push(textBlockGeo);
+          } else if (textBlockGeo) {
+            contentSpanX = textW;
+            contentSpanZ = textD;
+            textBlockGeo.translate(Number(params.textOffsetX) + innerHoleShiftX, yElevationText, -Number(params.textOffsetY) + innerHoleShiftZ);
+            parts.text.push(textBlockGeo);
+          } else if (graphicBlockGeo) {
+            contentSpanX = graphW;
+            contentSpanZ = graphD;
+            graphicBlockGeo.translate(Number(params.graphicOffsetX) + innerHoleShiftX, yElevationGraphic, -Number(params.graphicOffsetY) + innerHoleShiftZ);
+            parts.graphic.push(graphicBlockGeo);
+          }
+
+          // 4. CALCOLO DIMENSIONI E FORMA PIASTRA BASE (Auto-Fit oppure Manuale)
+          const shapeMode = params.plateShape;
+          const borderExtra = params.hasBorderRim ? Number(params.borderWidth) * 2 : 0;
+          const holeInnerExtraX = (params.holeStyle === 'inner-hole' && (params.holePosition === 'left' || params.holePosition === 'right'))
+            ? (holeTotalSpan + 2)
+            : 0;
+          const holeInnerExtraZ = (params.holeStyle === 'inner-hole' && params.holePosition === 'top')
+            ? (holeTotalSpan + 2)
+            : 0;
+
+          let plateW = Number(params.plateWidth);
+          let plateD = Number(params.plateHeight);
+
+          if (shapeMode === 'auto-pill' || shapeMode === 'auto-rect') {
+            plateW = Math.max(24, contentSpanX + Number(params.autoMarginX) * 2 + borderExtra + holeInnerExtraX);
+            plateD = Math.max(18, contentSpanZ + Number(params.autoMarginY) * 2 + borderExtra + holeInnerExtraZ);
+          } else if (shapeMode === 'circle' || shapeMode === 'hexagon') {
+            plateD = plateW;
+          }
+
+          // Costruisce la Shape 2D con +Y = Alto (-Z in 3D) e -Y = Basso (+Z in 3D)
+          const buildPlate2DShape = (w, d, shrink = 0) => {
+            const s = new THREE.Shape();
+            const hw = Math.max(2, w / 2 - shrink);
+            const hd = Math.max(2, d / 2 - shrink);
+
+            if (shapeMode === 'circle') {
+              s.absarc(0, 0, hw, 0, Math.PI * 2, false);
+            } else if (shapeMode === 'hexagon') {
+              for (let i = 0; i < 6; i++) {
+                const a = (Math.PI / 3) * i;
+                if (i === 0) s.moveTo(hw * Math.cos(a), hd * Math.sin(a));
+                else s.lineTo(hw * Math.cos(a), hd * Math.sin(a));
+              }
+              s.closePath();
+            } else if (shapeMode === 'shield') {
+              // Scudo con parte alta a +hd e punta inferiore a -hd
+              s.moveTo(-hw, hd * 0.82);
+              s.lineTo(0, hd);
+              s.lineTo(hw, hd * 0.82);
+              s.lineTo(hw, -hd * 0.15);
+              s.quadraticCurveTo(hw * 0.82, -hd * 0.75, 0, -hd);
+              s.quadraticCurveTo(-hw * 0.82, -hd * 0.75, -hw, -hd * 0.15);
+              s.closePath();
+            } else if (shapeMode === 'dog-tag') {
+              const chamfer = Math.max(1.5, Math.min(hw, hd) * 0.36);
+              s.moveTo(-hw + chamfer, -hd);
+              s.lineTo(hw - chamfer, -hd);
+              s.lineTo(hw, -hd + chamfer);
+              s.lineTo(hw, hd - chamfer);
+              s.lineTo(hw - chamfer, hd);
+              s.lineTo(-hw + chamfer, hd);
+              s.lineTo(-hw, hd - chamfer);
+              s.lineTo(-hw, -hd + chamfer);
+              s.closePath();
+            } else {
+              // Rounded Rect o Pill/Capsule
+              const isPill = (shapeMode === 'pill' || shapeMode === 'auto-pill');
+              const r = isPill
+                ? Math.min(hw, hd)
+                : Math.min(hw - 0.5, hd - 0.5, Math.max(0.8, Number(params.cornerRadius) - shrink));
+              s.moveTo(-hw + r, -hd);
+              s.lineTo(hw - r, -hd);
+              s.quadraticCurveTo(hw, -hd, hw, -hd + r);
+              s.lineTo(hw, hd - r);
+              s.quadraticCurveTo(hw, hd, hw - r, hd);
+              s.lineTo(-hw + r, hd);
+              s.quadraticCurveTo(-hw, hd, -hw, hd - r);
+              s.lineTo(-hw, -hd + r);
+              s.quadraticCurveTo(-hw, -hd, -hw + r, -hd);
+            }
+            return s;
+          };
+
+          const baseShape = buildPlate2DShape(plateW, plateD, 0);
+
+          // Calcolo coordinate del foro portachiavi in 2D (+Y = Top, -X = Left)
+          const holeR = Number(params.holeDiameter) / 2;
+          const rimW = Number(params.holeRimWidth);
+          const outerR = holeR + rimW;
+          const hOffset = Number(params.holeOffsetMm);
+          const bw = params.hasBorderRim ? Number(params.borderWidth) : 0;
+
+          const getHoleCoords = (pos, isInner) => {
+            const hw = plateW / 2;
+            const hd = plateD / 2;
+            if (isInner) {
+              const inset = outerR + bw + 0.8 - hOffset;
+              if (pos === 'top') return [0, hd - inset];
+              if (pos === 'right') return [hw - inset, 0];
+              if (pos === 'top-left') return [-hw + inset, hd - inset * 0.85];
+              return [-hw + inset, 0]; // left
+            } else {
+              // Raccordo tangente al bordo esterno così l'anello NON penetra mai dentro l'area interna del portachiavi
+              const outDist = outerR - Math.min(rimW * 0.45, Math.max(0.8, bw * 0.6)) + hOffset;
+              if (pos === 'top') return [0, hd + outDist];
+              if (pos === 'right') return [hw + outDist, 0];
+              if (pos === 'top-left') {
+                const isPill = (shapeMode === 'pill' || shapeMode === 'auto-pill');
+                const cr = isPill ? Math.min(hw, hd) : Math.min(hw, hd, Number(params.cornerRadius));
+                const diag = outDist * 0.707;
+                return [-hw + cr * 0.25 - diag, hd - cr * 0.25 + diag];
+              }
+              return [-hw - outDist, 0]; // left
+            }
+          };
+
+          // Se lo stile è "inner-hole", foriamo direttamente la Shape 2D della piastra
+          if (params.holeStyle === 'inner-hole') {
+            const [hx, hy] = getHoleCoords(params.holePosition, true);
+            const holePath = new THREE.Path();
+            holePath.absarc(hx, hy, holeR, 0, Math.PI * 2, true);
+            baseShape.holes.push(holePath);
+
+            // Bordino di rinforzo sopra il foro interno: poggia a Y=baseH senza compenetrare la base
+            if (params.hasBorderRim) {
+              const collarShape = new THREE.Shape();
+              collarShape.absarc(hx, hy, outerR, 0, Math.PI * 2, false);
+              const cHole = new THREE.Path();
+              cHole.absarc(hx, hy, holeR, 0, Math.PI * 2, true);
+              collarShape.holes.push(cHole);
+              const collarH = Number(params.borderReliefMm);
+              const collarGeo = new THREE.ExtrudeGeometry(collarShape, { depth: collarH, bevelEnabled: false, curveSegments: 32 });
+              collarGeo.rotateX(-Math.PI / 2);
+              collarGeo.translate(0, baseH, 0);
+              parts.border.push(collarGeo);
+            }
+          }
+
+          // Estrusione Piastra Base: con rotateX(-Math.PI / 2) va da Y=0 a Y=baseH
+          const baseGeo = new THREE.ExtrudeGeometry(baseShape, { depth: baseH, bevelEnabled: false, curveSegments: 48 });
+          baseGeo.rotateX(-Math.PI / 2);
+          parts.base.push(baseGeo);
+
+          // 5. BORDO PERIMETRALE A RILIEVO (Poggia esattamente a Y=baseH -> Y=baseH+bh, ZERO compenetrazione!)
+          if (params.hasBorderRim) {
+            const bh = Number(params.borderReliefMm);
+            const rimOuter = buildPlate2DShape(plateW, plateD, 0);
+            const rimInner = buildPlate2DShape(plateW, plateD, bw);
+            rimOuter.holes.push(rimInner);
+
+            const rimGeo = new THREE.ExtrudeGeometry(rimOuter, { depth: bh, bevelEnabled: false, curveSegments: 48 });
+            rimGeo.rotateX(-Math.PI / 2);
+            rimGeo.translate(0, baseH, 0);
+            parts.border.push(rimGeo);
+          }
+
+          // 6. ANELLO SPORGENTE ESTERNO (Singolo o Doppio SX+DX)
+          const buildOuterEar = (hx, hy) => {
+            const earShape = new THREE.Shape();
+            earShape.absarc(hx, hy, outerR, 0, Math.PI * 2, false);
+            const earHole = new THREE.Path();
+            earHole.absarc(hx, hy, holeR, 0, Math.PI * 2, true);
+            earShape.holes.push(earHole);
+
+            const earGeo = new THREE.ExtrudeGeometry(earShape, { depth: baseH, bevelEnabled: false, curveSegments: 36 });
+            earGeo.rotateX(-Math.PI / 2);
+            parts.base.push(earGeo);
+
+            if (params.hasBorderRim) {
+              const bh = Number(params.borderReliefMm);
+              const earRimGeo = new THREE.ExtrudeGeometry(earShape, { depth: bh, bevelEnabled: false, curveSegments: 36 });
+              earRimGeo.rotateX(-Math.PI / 2);
+              earRimGeo.translate(0, baseH, 0);
+              parts.border.push(earRimGeo);
+            }
+          };
+
+          if (params.holeStyle === 'outer-tab') {
+            const [hx, hy] = getHoleCoords(params.holePosition, false);
+            buildOuterEar(hx, hy);
+          } else if (params.holeStyle === 'dual-ears') {
+            const [lx, ly] = getHoleCoords('left', false);
+            const [rx, ry] = getHoleCoords('right', false);
+            buildOuterEar(lx, ly);
+            buildOuterEar(rx, ry);
+          }
+
+          // 7. UNIONE SICURA PER CANALE COLORE
+          const colorMap = {
+            base: params.colorBase,
+            border: params.colorBorder,
+            text: params.colorText,
+            graphic: params.colorGraphic
+          };
+
+          Object.keys(parts).forEach(partName => {
+            const list = parts[partName];
+            if (list.length === 0) return;
+            const merged = safeMergeGeometries(list);
+            if (!merged) return;
+            const mat = new THREE.MeshStandardMaterial({
+              color: new THREE.Color(colorMap[partName]),
+              roughness: 0.32,
+              metalness: 0.12
+            });
+            const m = new THREE.Mesh(merged, mat);
+            m.name = partName;
+            m.castShadow = true;
+            m.receiveShadow = true;
+            group.add(m);
+          });
+
+          return group;
+        }
+      },
+
+      // --------------------------------------------------------------------------
+      // GENERATORE 2: MAPPA 3D, ALTIMETRIA DEM & TARGHETTA
+      // --------------------------------------------------------------------------
+      {
+        id: '3d-city-map',
+        title: 'Mappa 3D, Altimetria & Targhetta',
+        category: 'Geografia & Architettura',
+        icon: 'map',
+        status: 'ready',
+        supportsMultiColorExport: true,
+        defaultParams: {
+          frameShape: 'rectangle',
+          sizeX: 140,
+          sizeY: 115,
+          baseThickness: 3.0,
+          detailLevel: 'high',
+          terrainMode: 'dem',
+          terrainExaggeration: 1.4,
+          maxTerrainReliefMm: 14.0,
+          terrainMeshRes: 44,
+          showPlaque: true,
+          plaqueText: 'TORINO',
+          plaqueSubtext: '45.070° N, 7.687° E',
+          plaqueStyle: 'front-tab',
+          plaqueTextSize: 6.5,
+          plaqueTextRelief: 1.4,
+          plaqueWidthRatio: 0.58,
+          showBuildings: true,
+          buildingHeightScale: 1.0,
+          showRoads: true,
+          roadReliefHeight: 0.8,
+          roadWidthMultiplier: 1.0,
+          showParks: true,
+          parkReliefHeight: 0.5,
+          showWater: true,
+          showBorderFrame: true,
+          frameWidth: 3.5,
+          frameHeight: 4.0,
+          colorBase: '#1e293b',
+          colorWater: '#0ea5e9',
+          colorParks: '#22c55e',
+          colorRoads: '#94a3b8',
+          colorBuildings: '#f8fafc',
+          colorFrame: '#334155',
+          colorPlaqueText: '#f59e0b'
+        },
+        schema: [
+          { type: 'map-picker-button', label: 'Apri/Chiudi Mappa 2D Affiancata' },
+          { type: 'header', label: 'Targhetta Custom & Testo 3D' },
+          { type: 'checkbox', key: 'showPlaque', label: 'Attiva Targhetta con Testo 3D' },
+          { type: 'text', key: 'plaqueText', label: 'Testo Principale (Città / Titolo)', placeholder: 'Es. TORINO' },
+          { type: 'text', key: 'plaqueSubtext', label: 'Sottotitolo / Coordinate', placeholder: 'Es. 45.070° N, 7.687° E' },
+          { type: 'select', key: 'plaqueStyle', label: 'Posizione Targhetta', options: [
+            { value: 'front-tab', label: 'Sporgente sul Bordo Anteriore' },
+            { value: 'on-frame', label: 'Sovrapposta dentro il Bordo Inferiore' }
+          ]},
+          { type: 'range', key: 'plaqueTextSize', label: 'Dimensione Carattere Titolo', min: 3.5, max: 12, step: 0.5, unit: 'mm' },
+          { type: 'range', key: 'plaqueTextRelief', label: 'Altezza Estrusione Lettere (Z)', min: 0.6, max: 3.5, step: 0.2, unit: 'mm' },
+          { type: 'range', key: 'plaqueWidthRatio', label: 'Larghezza Piastra Targhetta', min: 0.35, max: 0.90, step: 0.05, unit: 'x' },
+          { type: 'header', label: 'Altimetria Terreno 3D (DEM)' },
+          { type: 'select', key: 'terrainMode', label: 'Modalità Rilievo Terreno', options: [
+            { value: 'flat', label: 'Piatto (Stile Plastico Architettonico)' },
+            { value: 'dem', label: 'Altimetria Reale DEM (Colline / Montagne)' },
+            { value: 'synthetic-hill', label: 'Rilievo Topografico Artistico' }
+          ]},
+          { type: 'range', key: 'terrainExaggeration', label: 'Esagerazione Verticale Rilievo', min: 0.2, max: 3.5, step: 0.1, unit: 'x' },
+          { type: 'range', key: 'maxTerrainReliefMm', label: 'Dislivello Max Terreno (Z)', min: 2, max: 35, step: 1, unit: 'mm' },
+          { type: 'header', label: 'Forma Riquadro & Dimensioni (mm)' },
+          { type: 'select', key: 'frameShape', label: 'Forma del Riquadro di Stampa', options: [
+            { value: 'rectangle', label: 'Rettangolare (X × Y liberi)' },
+            { value: 'square', label: 'Quadrato Perfetto (X × X)' },
+            { value: 'circle', label: 'Circolare / Medaglione' },
+            { value: 'hexagon', label: 'Esagonale (Design Moderno)' }
+          ]},
+          { type: 'range', key: 'sizeX', label: 'Larghezza / Diametro (X)', min: 60, max: 240, step: 2, unit: 'mm' },
+          { type: 'range', key: 'sizeY', label: 'Profondità Rettangolo (Y)', min: 60, max: 240, step: 2, unit: 'mm' },
+          { type: 'range', key: 'baseThickness', label: 'Spessore Base Minima', min: 1.6, max: 8, step: 0.2, unit: 'mm' },
+          { type: 'select', key: 'detailLevel', label: 'Livello di Dettaglio Urbano', options: [
+            { value: 'low', label: 'Essenziale (Viali e Grandi Edifici)' },
+            { value: 'medium', label: 'Bilanciato (Consigliato ugello 0.4mm)' },
+            { value: 'high', label: 'Massimo (Include vicoli e piccoli edifici)' }
+          ]},
+          { type: 'header', label: 'Livelli Mappa (Edifici, Strade, Natura)' },
+          { type: 'checkbox', key: 'showBuildings', label: 'Mostra Edifici 3D' },
+          { type: 'range', key: 'buildingHeightScale', label: 'Scala Altezza Edifici (Z)', min: 0.3, max: 3.0, step: 0.1, unit: 'x' },
+          { type: 'checkbox', key: 'showRoads', label: 'Mostra Rete Stradale' },
+          { type: 'range', key: 'roadReliefHeight', label: 'Spessore Rilievo Strade', min: 0.4, max: 2.4, step: 0.2, unit: 'mm' },
+          { type: 'range', key: 'roadWidthMultiplier', label: 'Larghezza Strade', min: 0.5, max: 2.2, step: 0.1, unit: 'x' },
+          { type: 'checkbox', key: 'showParks', label: 'Mostra Parchi e Aree Verdi' },
+          { type: 'checkbox', key: 'showWater', label: 'Mostra Fiumi / Specchi d\'Acqua' },
+          { type: 'checkbox', key: 'showBorderFrame', label: 'Aggiungi Cornice Perimetrale' },
+          { type: 'range', key: 'frameWidth', label: 'Spessore Bordo Cornice', min: 1.5, max: 8, step: 0.5, unit: 'mm' },
+          { type: 'range', key: 'frameHeight', label: 'Altezza Cornice', min: 1.0, max: 12, step: 0.5, unit: 'mm' },
+          { type: 'header', label: 'Palette Multicolore (AMS / Layer)' },
+          { type: 'color', key: 'colorBase', label: 'Colore 1: Terreno / Rilievo DEM' },
+          { type: 'color', key: 'colorWater', label: 'Colore 2: Fiumi e Acqua' },
+          { type: 'color', key: 'colorParks', label: 'Colore 3: Parchi e Verde' },
+          { type: 'color', key: 'colorRoads', label: 'Colore 4: Strade e Piazze' },
+          { type: 'color', key: 'colorBuildings', label: 'Colore 5: Edifici 3D' },
+          { type: 'color', key: 'colorFrame', label: 'Colore 6: Cornice & Base Targhetta' },
+          { type: 'color', key: 'colorPlaqueText', label: 'Colore 7: Testo 3D Targhetta' }
+        ],
+        buildGeometry: (params, state) => {
+          if (!state.mapData) state.mapData = Map3DEngine.generateDemoCityData();
+          const mapData = state.mapData;
+          const group = new THREE.Group();
+          const shapeType = params.frameShape;
+          const sizeX = Number(params.sizeX);
+          const sizeZ = (shapeType === 'rectangle') ? Number(params.sizeY) : sizeX;
+          const baseH = Number(params.baseThickness);
+          const terrainMode = params.terrainMode;
+          const exaggeration = Number(params.terrainExaggeration);
+          const maxReliefMm = Number(params.maxTerrainReliefMm);
+
+          const parts = { base: [], water: [], parks: [], roads: [], buildings: [], frame: [], text: [] };
+          const getReliefAt = (nx, nz) => Map3DEngine.sampleTerrainReliefMm(nx, nz, mapData.elevationGrid, terrainMode, exaggeration, maxReliefMm);
+
+          const createBoundaryShape = (w, d, shrink = 0) => {
+            const s = new THREE.Shape();
+            const hw = Math.max(2, w / 2 - shrink), hd = Math.max(2, d / 2 - shrink);
+            if (shapeType === 'circle') s.absarc(0, 0, hw, 0, Math.PI * 2, false);
+            else if (shapeType === 'hexagon') {
+              for (let i = 0; i < 6; i++) {
+                const a = (Math.PI / 3) * i;
+                if (i === 0) s.moveTo(hw * Math.cos(a), hd * Math.sin(a));
+                else s.lineTo(hw * Math.cos(a), hd * Math.sin(a));
+              }
+              s.closePath();
+            } else {
+              s.moveTo(-hw, -hd); s.lineTo(hw, -hd); s.lineTo(hw, hd); s.lineTo(-hw, hd); s.closePath();
+            }
+            return s;
+          };
+
+          if (terrainMode === 'flat') {
+            const baseGeo = new THREE.ExtrudeGeometry(createBoundaryShape(sizeX, sizeZ, 0), { depth: baseH, bevelEnabled: false, curveSegments: 48 });
+            baseGeo.rotateX(Math.PI / 2);
+            baseGeo.translate(0, baseH, 0);
+            parts.base.push(baseGeo);
+          } else {
+            parts.base.push(Map3DEngine.buildSolidTerrainMesh(sizeX, sizeZ, baseH, shapeType, Number(params.terrainMeshRes || 44), getReliefAt));
+          }
+
+          const frameMargin = params.showBorderFrame ? Number(params.frameWidth) : 0;
+          if (params.showBorderFrame) {
+            const outerShape = createBoundaryShape(sizeX, sizeZ, 0);
+            outerShape.holes.push(createBoundaryShape(sizeX, sizeZ, frameMargin));
+            const fHeight = Number(params.frameHeight);
+            const frameGeo = new THREE.ExtrudeGeometry(outerShape, { depth: baseH + fHeight, bevelEnabled: false, curveSegments: 48 });
+            frameGeo.rotateX(Math.PI / 2);
+            frameGeo.translate(0, baseH + fHeight, 0);
+            parts.frame.push(frameGeo);
+          }
+
+          const usableRatio = Math.max(0.7, (sizeX - frameMargin * 2.1) / sizeX);
+          const createElevatedPolygonGeo = (pts, height, sink = 0.8) => {
+            if (pts.length < 3) return null;
+            let cx = 0, cz = 0;
+            pts.forEach(([px, pz]) => { cx += px; cz += pz; });
+            cx /= pts.length; cz /= pts.length;
+            if (!Map3DEngine.isPointInsideShape(cx, cz, shapeType, usableRatio)) return null;
+            const polyShape = new THREE.Shape();
+            pts.forEach(([nx, nz], idx) => {
+              const x = nx * sizeX * usableRatio, y = nz * sizeZ * usableRatio;
+              if (idx === 0) polyShape.moveTo(x, y); else polyShape.lineTo(x, y);
+            });
+            polyShape.closePath();
+            const groundY = baseH + getReliefAt(cx, cz);
+            const geo = new THREE.ExtrudeGeometry(polyShape, { depth: height + sink, bevelEnabled: false });
+            geo.rotateX(Math.PI / 2);
+            geo.translate(0, groundY + height, 0);
+            return geo;
+          };
+
+          if (params.showWater && mapData.water) mapData.water.forEach(p => { const g = createElevatedPolygonGeo(p, 0.35, 0.8); if (g) parts.water.push(g); });
+          if (params.showParks && mapData.parks) mapData.parks.forEach(p => { const g = createElevatedPolygonGeo(p, Number(params.parkReliefHeight), 0.8); if (g) parts.parks.push(g); });
+
+          if (params.showRoads && mapData.roads) {
+            const roadH = Number(params.roadReliefHeight), widthMult = Number(params.roadWidthMultiplier);
+            mapData.roads.forEach(road => {
+              if (params.detailLevel === 'low' && road.type !== 'primary') return;
+              if (params.detailLevel === 'medium' && road.type === 'minor') return;
+              const roadW = (road.type === 'primary' ? 2.4 : road.type === 'secondary' ? 1.6 : 1.0) * widthMult;
+              const pts = road.points;
+              for (let i = 0; i < pts.length - 1; i++) {
+                const [nx1, nz1] = pts[i], [nx2, nz2] = pts[i + 1];
+                if (!Map3DEngine.isPointInsideShape((nx1 + nx2) / 2, (nz1 + nz2) / 2, shapeType, usableRatio)) continue;
+                const x1 = nx1 * sizeX * usableRatio, z1 = -nz1 * sizeZ * usableRatio;
+                const x2 = nx2 * sizeX * usableRatio, z2 = -nz2 * sizeZ * usableRatio;
+                const y1 = baseH + getReliefAt(nx1, nz1), y2 = baseH + getReliefAt(nx2, nz2);
+                const dx = x2 - x1, dz = z2 - z1, dy = y2 - y1, planarLen = Math.hypot(dx, dz);
+                if (planarLen < 0.3) continue;
+                const segGeo = new THREE.BoxGeometry(Math.hypot(planarLen, dy) + roadW * 0.4, roadH + 0.8, roadW);
+                segGeo.rotateZ(Math.atan2(dy, planarLen));
+                segGeo.rotateY(-Math.atan2(dz, dx));
+                segGeo.translate((x1 + x2) / 2, (y1 + y2) / 2 + (roadH - 0.8) / 2, (z1 + z2) / 2);
+                parts.roads.push(segGeo);
+              }
+            });
+          }
+
+          if (params.showBuildings && mapData.buildings) {
+            const hScale = Number(params.buildingHeightScale);
+            mapData.buildings.forEach((b, idx) => {
+              if (params.detailLevel === 'low' && b.heightMeters < 11 && idx % 2 === 0) return;
+              const g = createElevatedPolygonGeo(b.footprint, Math.max(1.6, b.heightMeters * 0.45 * hScale), 2.2);
+              if (g) parts.buildings.push(g);
+            });
+          }
+
+          if (params.showPlaque && (params.plaqueText.trim() !== '' || params.plaqueSubtext.trim() !== '')) {
+            const titleStr = params.plaqueText.trim(), subStr = params.plaqueSubtext.trim(), hasSub = subStr.length > 0;
+            const textSize = Number(params.plaqueTextSize), subSize = Math.max(2.6, textSize * 0.52), textRelief = Number(params.plaqueTextRelief);
+            const plaqueW = sizeX * Number(params.plaqueWidthRatio), plaqueDepthZ = hasSub ? (textSize + subSize + 8.5) : (textSize + 6.5);
+            const plaqueH = baseH + (params.showBorderFrame ? Number(params.frameHeight) : 1.8);
+            const frontEdgeZ = (shapeType === 'hexagon') ? (sizeZ * 0.433) : (sizeZ / 2);
+            const plaqueCenterZ = (params.plaqueStyle === 'front-tab') ? (frontEdgeZ + plaqueDepthZ / 2 - 1.5) : (frontEdgeZ - plaqueDepthZ / 2 - (frameMargin * 0.4));
+
+            const pShape = new THREE.Shape(), pw = plaqueW / 2, pd = plaqueDepthZ / 2, r = Math.min(3.5, pd * 0.4);
+            pShape.moveTo(-pw + r, -pd); pShape.lineTo(pw - r, -pd); pShape.quadraticCurveTo(pw, -pd, pw, -pd + r);
+            pShape.lineTo(pw, pd - r); pShape.quadraticCurveTo(pw, pd, pw - r, pd); pShape.lineTo(-pw + r, pd);
+            pShape.quadraticCurveTo(-pw, pd, -pw, pd - r); pShape.lineTo(-pw, -pd + r); pShape.quadraticCurveTo(-pw, -pd, -pw + r, -pd);
+
+            const plaqueGeo = new THREE.ExtrudeGeometry(pShape, { depth: plaqueH, bevelEnabled: false, curveSegments: 16 });
+            plaqueGeo.rotateX(Math.PI / 2);
+            plaqueGeo.translate(0, plaqueH, plaqueCenterZ);
+            parts.frame.push(plaqueGeo);
+
+            if (state.loadedFont) {
+              const buildCenteredText = (str, size, zOffset) => {
+                if (!str) return;
+                const tGeo = new TextGeometry(str, { font: state.loadedFont, size, height: textRelief + 0.4, curveSegments: 6, bevelEnabled: false });
+                tGeo.computeBoundingBox();
+                const bb = tGeo.boundingBox;
+                tGeo.translate(-(bb.max.x - bb.min.x) / 2, -(bb.max.y - bb.min.y) / 2, 0);
+                tGeo.rotateX(-Math.PI / 2);
+                tGeo.translate(0, plaqueH - 0.3, plaqueCenterZ + zOffset);
+                parts.text.push(tGeo);
+              };
+              if (titleStr && hasSub) { buildCenteredText(titleStr, textSize, -subSize * 0.7); buildCenteredText(subStr, subSize, textSize * 0.65); }
+              else if (titleStr) buildCenteredText(titleStr, textSize, 0);
+              else if (hasSub) buildCenteredText(subStr, subSize, 0);
+            }
+          }
+
+          const colorMap = { base: params.colorBase, water: params.colorWater, parks: params.colorParks, roads: params.colorRoads, buildings: params.colorBuildings, frame: params.colorFrame, text: params.colorPlaqueText };
+          Object.keys(parts).forEach(partName => {
+            if (parts[partName].length === 0) return;
+            const merged = safeMergeGeometries(parts[partName]);
+            if (!merged) return;
+            const m = new THREE.Mesh(merged, new THREE.MeshStandardMaterial({ color: new THREE.Color(colorMap[partName]), roughness: 0.38, metalness: 0.1 }));
+            m.name = partName; m.castShadow = true; m.receiveShadow = true;
+            group.add(m);
+          });
+          return group;
+        }
+      },
+
+      // --------------------------------------------------------------------------
+      // GENERATORE 3: SOUNDWAVE 3D (MP3 to STL)
+      // --------------------------------------------------------------------------
+      {
+        id: 'soundwave-3d',
+        title: 'Soundwave 3D (MP3 to STL)',
+        category: 'Audio & Art',
+        icon: 'audio-waveform',
+        status: 'ready',
+        supportsMultiColorExport: false,
+        defaultParams: {
+          barsCount: 65,
+          totalLength: 140,
+          barDepth: 10,
+          maxBarHeight: 32,
+          minBarHeight: 2.5,
+          barGapRatio: 0.25,
+          waveStyle: 'symmetric',
+          plateOrientation: 'horizontal-on-plate', // 'horizontal-on-plate', 'horizontal-on-base', 'vertical-on-plate', 'vertical-stand'
+          hasBase: true,
+          baseThickness: 3,
+          baseMarginX: 6,
+          baseMarginY: 4,
+          keychainHole: false,
+          holeDiameter: 4.5,
+          exponentCurve: 1.0,
+          modelColor: '#3b82f6'
+        },
+        schema: [
+          { type: 'file-audio', key: 'audioFile', label: 'Carica File Audio (MP3 / WAV)' },
+          { type: 'header', label: 'Orientamento sul Piatto & Stile Onda' },
+          { type: 'select', key: 'plateOrientation', label: 'Orientamento Onda sul Piatto di Stampa', options: [
+            { value: 'horizontal-on-plate', label: 'Sdraiata sul Piatto (Tutta l\'onda tocca il piatto XY)' },
+            { value: 'horizontal-on-base', label: 'Sdraiata sopra Piastra di Base (Rilievo Orizzontale)' },
+            { value: 'vertical-on-plate', label: 'Verticale a Contatto col Piatto (Cresce in Altezza Z)' },
+            { value: 'vertical-stand', label: 'Verticale Sospesa su Piedistallo (Con Pilastrini)' }
+          ]},
+          { type: 'select', key: 'waveStyle', label: 'Stile Profilo Onda', options: [
+            { value: 'symmetric', label: 'Simmetrica Doppia (Stile Equalizzatore)' },
+            { value: 'flat', label: 'Singola Unilaterale (Metà Superiore)' }
+          ]},
+          { type: 'range', key: 'barsCount', label: 'Numero di Barre', min: 15, max: 180, step: 1, unit: '' },
+          { type: 'range', key: 'totalLength', label: 'Lunghezza Onda (X)', min: 40, max: 250, step: 1, unit: 'mm' },
+          { type: 'range', key: 'maxBarHeight', label: 'Ampiezza Max Picchi Onda', min: 8, max: 85, step: 1, unit: 'mm' },
+          { type: 'range', key: 'minBarHeight', label: 'Ampiezza Minima Silenzio', min: 1.0, max: 15, step: 0.2, unit: 'mm' },
+          { type: 'range', key: 'barDepth', label: 'Spessore / Profondità Barre', min: 2, max: 40, step: 0.5, unit: 'mm' },
+          { type: 'range', key: 'barGapRatio', label: 'Spazio tra le Barre', min: 0.0, max: 0.75, step: 0.05, unit: 'x' },
+          { type: 'range', key: 'exponentCurve', label: 'Contrasto Dinamico Picchi', min: 0.4, max: 2.5, step: 0.1, unit: 'γ' },
+          { type: 'header', label: 'Base & Portachiavi' },
+          { type: 'checkbox', key: 'hasBase', label: 'Aggiungi Base / Barra di Supporto' },
+          { type: 'range', key: 'baseThickness', label: 'Spessore Base', min: 1.2, max: 12, step: 0.4, unit: 'mm' },
+          { type: 'range', key: 'baseMarginX', label: 'Margine Lunghezza (X)', min: 0, max: 25, step: 1, unit: 'mm' },
+          { type: 'range', key: 'baseMarginY', label: 'Margine Larghezza (Y)', min: 0, max: 20, step: 0.5, unit: 'mm' },
+          { type: 'checkbox', key: 'keychainHole', label: 'Aggiungi Anello Portachiavi' },
+          { type: 'range', key: 'holeDiameter', label: 'Diametro Foro', min: 2.5, max: 8, step: 0.5, unit: 'mm' },
+          { type: 'header', label: 'Colore Anteprima' },
+          { type: 'color', key: 'modelColor', label: 'Colore Filamento' }
+        ],
+        buildGeometry: (params, state) => {
+          const geometries = [];
+          const count = Number(params.barsCount);
+          const peaks = state.rawAudioChannelData
+            ? AudioWaveformProcessor.computePeaksFromChannelData(state.rawAudioChannelData, count)
+            : AudioWaveformProcessor.generateDemoPeaks(count);
+
+          const totalLen = Number(params.totalLength);
+          const depth = Number(params.barDepth);
+          const maxH = Number(params.maxBarHeight);
+          const minH = Number(params.minBarHeight);
+          const gapRatio = Number(params.barGapRatio);
+          const gamma = Number(params.exponentCurve);
+          const baseThick = Number(params.baseThickness);
+          const orient = params.plateOrientation || 'horizontal-on-plate';
+          const isSymmetric = params.waveStyle === 'symmetric';
+
+          const pitch = totalLen / count;
+          const barWidth = Math.max(0.4, pitch * (1 - gapRatio));
+          const startX = -totalLen / 2 + pitch / 2;
+
+          const isHorizontal = (orient === 'horizontal-on-plate' || orient === 'horizontal-on-base');
+          // Se è horizontal-on-base, la piastra di base sta sotto (Y=0..baseThick) e l'onda poggia sopra;
+          // se è horizontal-on-plate, TUTTA l'onda poggia direttamente sul piatto di stampa (Y=0..depth)!
+          const yBottomWave = (orient === 'horizontal-on-base' && params.hasBase) ? baseThick : 0;
+
+          for (let i = 0; i < count; i++) {
+            const h = minH + Math.pow(peaks[i] || 0, gamma) * (maxH - minH);
+            const cx = startX + i * pitch;
+
+            if (isHorizontal) {
+              // Onda sdraiata sul piatto: lo spessore verticale è 'depth' (Y), i picchi si estendono sul piano XZ (Z)
+              const barGeo = new THREE.BoxGeometry(barWidth, depth, h);
+              const cz = isSymmetric ? 0 : (-h / 2);
+              barGeo.translate(cx, yBottomWave + depth / 2, cz);
+              geometries.push(barGeo);
+            } else if (orient === 'vertical-on-plate') {
+              // Onda verticale che poggia direttamente sul piatto (o sulla base piatta) senza restare sospesa
+              const yStart = params.hasBase ? baseThick : 0;
+              const barGeo = new THREE.BoxGeometry(barWidth, h, depth);
+              barGeo.translate(cx, yStart + h / 2, 0);
+              geometries.push(barGeo);
+            } else {
+              // vertical-stand: Onda verticale simmetrica sospesa a mezz'aria con piedistallo
+              const centerElevation = maxH / 2 + (params.hasBase ? baseThick : 0);
+              const barGeo = new THREE.BoxGeometry(barWidth, h, depth);
+              barGeo.translate(cx, centerElevation, 0);
+              geometries.push(barGeo);
+            }
+          }
+
+          // Spina centrale di unione quando l'onda è sdraiata sul piatto (così le barre non si separano mai!)
+          if (isHorizontal) {
+            const spineW = Math.min(minH, 2.6);
+            const spineZ = isSymmetric ? 0 : (-spineW / 2);
+            const spineGeo = new THREE.BoxGeometry(totalLen, depth, spineW);
+            spineGeo.translate(0, yBottomWave + depth / 2, spineZ);
+            geometries.push(spineGeo);
+          }
+
+          // Costruzione Base in base all'orientamento scelto
+          if (params.hasBase) {
+            const baseW = totalLen + Number(params.baseMarginX) * 2;
+            if (orient === 'horizontal-on-plate') {
+              // Barra di base sul bordo inferiore dell'onda, anch'essa appoggiata direttamente sul piatto (Y=0..depth)
+              const edgeZ = isSymmetric ? (maxH / 2 + baseThick / 2) : (baseThick / 2);
+              const bottomBarGeo = new THREE.BoxGeometry(baseW, depth, baseThick);
+              bottomBarGeo.translate(0, depth / 2, edgeZ);
+              geometries.push(bottomBarGeo);
+
+              // Se le barre sono corte ai lati, colleghiamo la spina centrale o le barre alla base
+              if (isSymmetric) {
+                const pillarW = Math.max(3, totalLen * 0.035);
+                const p1 = new THREE.BoxGeometry(pillarW, depth, maxH / 2 + baseThick / 2);
+                p1.translate(-totalLen * 0.32, depth / 2, (maxH / 2 + baseThick / 2) / 2);
+                const p2 = new THREE.BoxGeometry(pillarW, depth, maxH / 2 + baseThick / 2);
+                p2.translate(totalLen * 0.32, depth / 2, (maxH / 2 + baseThick / 2) / 2);
+                geometries.push(p1, p2);
+              }
+            } else if (orient === 'horizontal-on-base') {
+              // Piastra di base piatta sotto tutta l'onda sdraiata (perfetta anche per cambio colore a layer!)
+              const spanZ = maxH + Number(params.baseMarginY) * 2;
+              const centerZ = isSymmetric ? 0 : (-maxH / 2);
+              const plateGeo = new THREE.BoxGeometry(baseW, baseThick, spanZ);
+              plateGeo.translate(0, baseThick / 2, centerZ);
+              geometries.push(plateGeo);
+            } else if (orient === 'vertical-on-plate') {
+              // Piastra di base piatta sotto l'onda verticale
+              const baseD = depth + Number(params.baseMarginY) * 2;
+              const baseGeo = new THREE.BoxGeometry(baseW, baseThick, baseD);
+              baseGeo.translate(0, baseThick / 2, 0);
+              geometries.push(baseGeo);
+            } else {
+              // vertical-stand: Piedistallo inferiore + 2 pilastrini + spina centrale sospesa
+              const baseD = depth + Number(params.baseMarginY) * 2;
+              const centerElevation = maxH / 2 + baseThick;
+              const spineGeo = new THREE.BoxGeometry(totalLen, Math.min(minH, 3), depth * 0.6);
+              spineGeo.translate(0, centerElevation, 0);
+              const standGeo = new THREE.BoxGeometry(baseW, baseThick, baseD);
+              standGeo.translate(0, baseThick / 2, 0);
+              const pillarW = Math.max(3, totalLen * 0.04);
+              const p1 = new THREE.BoxGeometry(pillarW, centerElevation, depth * 0.6);
+              p1.translate(-totalLen * 0.32, centerElevation / 2, 0);
+              const p2 = new THREE.BoxGeometry(pillarW, centerElevation, depth * 0.6);
+              p2.translate(totalLen * 0.32, centerElevation / 2, 0);
+              geometries.push(spineGeo, standGeo, p1, p2);
+            }
+          }
+
+          // Anello Portachiavi (sempre a contatto col piatto Y=0)
+          if (params.keychainHole) {
+            const holeR = Number(params.holeDiameter) / 2;
+            const outerR = holeR + 2.8;
+            const tabThick = isHorizontal ? (orient === 'horizontal-on-base' && params.hasBase ? baseThick : depth) : (params.hasBase ? baseThick : Math.min(4, minH));
+
+            const ringShape = new THREE.Shape();
+            ringShape.absarc(0, 0, outerR, 0, Math.PI * 2, false);
+            const holePath = new THREE.Path();
+            holePath.absarc(0, 0, holeR, 0, Math.PI * 2, true);
+            ringShape.holes.push(holePath);
+
+            const ringGeo = new THREE.ExtrudeGeometry(ringShape, { depth: tabThick, bevelEnabled: false, curveSegments: 32 });
+            ringGeo.rotateX(-Math.PI / 2);
+
+            const leftEdgeX = -(totalLen / 2 + (params.hasBase && orient !== 'horizontal-on-plate' ? Number(params.baseMarginX) : 0));
+            const ringZ = (!isHorizontal || isSymmetric) ? 0 : (-minH / 2);
+            ringGeo.translate(leftEdgeX - outerR + 1.4, 0, ringZ);
+            geometries.push(ringGeo);
+          }
+
+          const merged = safeMergeGeometries(geometries);
+          const mesh = new THREE.Mesh(
+            merged || new THREE.BoxGeometry(10, 2, 10),
+            new THREE.MeshStandardMaterial({ color: new THREE.Color(params.modelColor), roughness: 0.35, metalness: 0.1 })
+          );
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+          return mesh;
+        }
+      }
+    ];
+
+    // ============================================================================
+    // 5. APPLICAZIONE PRINCIPALE (ANTEPRIMA 3D SEMPRE ATTIVA)
+    // ============================================================================
+    const FONT_URLS = {
+      helvetiker_bold: 'https://unpkg.com/three@0.160.0/examples/fonts/helvetiker_bold.typeface.json',
+      helvetiker_regular: 'https://unpkg.com/three@0.160.0/examples/fonts/helvetiker_regular.typeface.json',
+      optimer_bold: 'https://unpkg.com/three@0.160.0/examples/fonts/optimer_bold.typeface.json',
+      gentilis_bold: 'https://unpkg.com/three@0.160.0/examples/fonts/gentilis_bold.typeface.json',
+      droid_sans_bold: 'https://unpkg.com/three@0.160.0/examples/fonts/droid/droid_sans_bold.typeface.json'
+    };
+
+    class MakerStudioApp {
+      constructor() {
+        this.activeTool = null;
+        this.currentParams = {};
+        this.appState = {
+          rawAudioChannelData: null,
+          audioFileName: 'Onda Sonora Demo',
+          mapData: Map3DEngine.generateDemoCityData(),
+          loadedFont: null,
+          fonts: {},
+          customSvgText: null,
+          customRasterImage: null,
+          customGraphicName: 'Icona Razzo (Preset)'
+        };
+
+        this.tabsContainer = document.getElementById('top-generator-tabs');
+        this.controlsContainer = document.getElementById('ws-controls-container');
+        this.bboxInfo = document.getElementById('ws-bbox-info');
+        this.btnExportMulti = document.getElementById('btn-export-multicolor');
+        this.mapDrawer = document.getElementById('map-picker-drawer');
+
+        this.initThreeViewport();
+        this.initTopTabs();
+        this.initEvents();
+        // Apriamo immediatamente il Portachiavi & Badge Studio Pro all'avvio!
+        this.openGenerator('keychain-tag');
+        this.preloadFonts();
+        lucide.createIcons();
+      }
+
+      preloadFonts() {
+        const loader = new FontLoader();
+        Object.entries(FONT_URLS).forEach(([key, url]) => {
+          loader.load(url, (font) => {
+            this.appState.fonts[key] = font;
+            if (key === 'helvetiker_bold') this.appState.loadedFont = font;
+            if (this.activeTool) this.rebuild3DModel();
+          });
+        });
+      }
+
+      initTopTabs() {
+        this.tabsContainer.innerHTML = '';
+        GENERATORS.forEach(tool => {
+          const btn = document.createElement('button');
+          btn.dataset.toolId = tool.id;
+          btn.className = 'tab-btn flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition shrink-0 border';
+          btn.innerHTML = `<i data-lucide="${tool.icon}" class="w-4 h-4"></i><span>${tool.title}</span>`;
+          btn.addEventListener('click', () => this.openGenerator(tool.id));
+          this.tabsContainer.appendChild(btn);
+        });
+      }
+
+      updateTabStyles() {
+        this.tabsContainer.querySelectorAll('.tab-btn').forEach(btn => {
+          const isActive = btn.dataset.toolId === this.activeTool?.id;
+          btn.className = `tab-btn flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition shrink-0 border ${
+            isActive
+              ? 'bg-blue-600 text-white border-blue-500 shadow-lg shadow-blue-600/25'
+              : 'bg-gray-800/80 text-gray-300 border-gray-700 hover:bg-gray-800 hover:text-white'
+          }`;
+        });
+      }
+
+      initThreeViewport() {
+        const container = document.getElementById('viewport-container');
+        this.scene = new THREE.Scene();
+
+        this.camera = new THREE.PerspectiveCamera(42, container.clientWidth / container.clientHeight, 1, 2500);
+        this.camera.position.set(0, 110, 125);
+
+        this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        this.renderer.setSize(container.clientWidth, container.clientHeight);
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        this.renderer.shadowMap.enabled = true;
+        container.appendChild(this.renderer.domElement);
+
+        this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+        this.controls.enableDamping = true;
+        this.controls.dampingFactor = 0.06;
+        this.controls.target.set(0, 2, 0);
+
+        this.scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+
+        const dirLight1 = new THREE.DirectionalLight(0xffffff, 1.3);
+        dirLight1.position.set(90, 190, 130);
+        dirLight1.castShadow = true;
+        this.scene.add(dirLight1);
+
+        const dirLight2 = new THREE.DirectionalLight(0x60a5fa, 0.5);
+        dirLight2.position.set(-110, 90, -90);
+        this.scene.add(dirLight2);
+
+        const buildPlateGrid = new THREE.GridHelper(256, 16, 0x3b82f6, 0x1f2937);
+        this.scene.add(buildPlateGrid);
+
+        window.addEventListener('resize', () => this.onWindowResize());
+
+        const animate = () => {
+          requestAnimationFrame(animate);
+          this.controls.update();
+          this.renderer.render(this.scene, this.camera);
+        };
+        animate();
+      }
+
+      onWindowResize() {
+        if (!this.renderer) return;
+        const container = document.getElementById('viewport-container');
+        if (container.clientWidth === 0) return;
+        this.camera.aspect = container.clientWidth / container.clientHeight;
+        this.camera.updateProjectionMatrix();
+        this.renderer.setSize(container.clientWidth, container.clientHeight);
+      }
+
+      toggleSplitMapDrawer(forceOpen) {
+        const isHidden = this.mapDrawer.classList.contains('hidden');
+        const shouldOpen = forceOpen !== undefined ? forceOpen : isHidden;
+
+        if (shouldOpen) {
+          this.mapDrawer.classList.remove('hidden');
+          this.mapDrawer.classList.add('flex');
+          this.initLeafletMap();
+        } else {
+          this.mapDrawer.classList.add('hidden');
+          this.mapDrawer.classList.remove('flex');
+        }
+        setTimeout(() => this.onWindowResize(), 50);
+      }
+
+      initLeafletMap() {
+        if (this.leafletMap) {
+          setTimeout(() => this.leafletMap.invalidateSize(), 100);
+          this.updateMapCropFrameShape();
+          return;
+        }
+        this.leafletMap = L.map('leaflet-map', { zoomControl: true }).setView([45.0703, 7.6869], 15);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '© OpenStreetMap'
+        }).addTo(this.leafletMap);
+        this.updateMapCropFrameShape();
+      }
+
+      updateMapCropFrameShape() {
+        const frameEl = document.getElementById('map-crop-frame');
+        if (!frameEl) return;
+        const shape = this.currentParams.frameShape || 'rectangle';
+        const sx = Number(this.currentParams.sizeX || 140);
+        const sy = shape === 'rectangle' ? Number(this.currentParams.sizeY || 115) : sx;
+        const basePx = 210;
+        const ratio = sy / sx;
+        frameEl.style.width = `${basePx}px`;
+        frameEl.style.height = `${Math.round(basePx * ratio)}px`;
+        frameEl.style.borderRadius = shape === 'circle' ? '9999px' : '12px';
+        frameEl.style.clipPath = shape === 'hexagon' ? 'polygon(25% 5%, 75% 5%, 100% 50%, 75% 95%, 25% 95%, 0% 50%)' : 'none';
+      }
+
+      openGenerator(toolId) {
+        const tool = GENERATORS.find(t => t.id === toolId);
+        if (!tool) return;
+
+        this.activeTool = tool;
+        this.currentParams = { ...tool.defaultParams };
+        this.updateTabStyles();
+
+        if (toolId !== '3d-city-map') {
+          this.toggleSplitMapDrawer(false);
+        }
+
+        if (tool.supportsMultiColorExport) {
+          this.btnExportMulti.classList.remove('hidden');
+          this.btnExportMulti.classList.add('flex');
+        } else {
+          this.btnExportMulti.classList.add('hidden');
+          this.btnExportMulti.classList.remove('flex');
+        }
+
+        document.getElementById('ws-tool-category').textContent = tool.category;
+        document.getElementById('ws-tool-title').textContent = tool.title;
+
+        // Adatta distanza camera allo strumento
+        if (toolId === 'keychain-tag') {
+          this.camera.position.set(0, 95, 85);
+          this.controls.target.set(0, 2, 0);
+        } else {
+          this.camera.position.set(0, 135, 185);
+          this.controls.target.set(0, 6, 0);
+        }
+        this.controls.update();
+
+        this.buildSidebarControls(tool);
+        this.rebuild3DModel();
+        lucide.createIcons();
+      }
+
+      buildSidebarControls(tool) {
+        this.controlsContainer.innerHTML = '';
+        const statusLabel = document.getElementById('status-badge-label');
+
+        tool.schema.forEach(item => {
+          if (item.type === 'header') {
+            const h = document.createElement('div');
+            h.className = 'pt-3 pb-1 border-b border-gray-800 text-[11px] font-bold uppercase tracking-wider text-blue-400';
+            h.textContent = item.label;
+            this.controlsContainer.appendChild(h);
+            return;
+          }
+
+          // UPLOADER SVG / PNG / JPG PER PORTACHIAVI CON ANTEPRIMA 2D INTEGRATA
+          if (item.type === 'keychain-graphic-uploader') {
+            const box = document.createElement('div');
+            box.className = 'p-3 rounded-xl bg-gray-800/80 border border-gray-700 space-y-2.5';
+            box.innerHTML = `
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold text-gray-200">${item.label}</span>
+                <span class="text-[10px] font-mono text-emerald-400" id="graphic-source-badge">${this.appState.customGraphicName}</span>
+              </div>
+              <input type="file" accept=".svg,image/svg+xml,image/png,image/jpeg,image/webp" id="input-keychain-graphic"
+                class="block w-full text-xs text-gray-300 file:mr-2.5 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor-pointer" />
+              <div class="flex items-center gap-3 pt-1">
+                <canvas id="raster-preview-canvas" width="48" height="48" class="w-12 h-12 rounded-lg bg-gray-900 border border-gray-700 shrink-0 object-contain"></canvas>
+                <p class="text-[11px] text-gray-400 leading-tight">
+                  Supporta vettori <strong class="text-gray-200">.SVG</strong> e loghi <strong class="text-gray-200">.PNG/.JPG</strong> (convertiti automaticamente in rilievo 3D).
+                </p>
+              </div>
+            `;
+
+            const fileInput = box.querySelector('#input-keychain-graphic');
+            const badge = box.querySelector('#graphic-source-badge');
+
+            fileInput.addEventListener('change', async (e) => {
+              const file = e.target.files[0];
+              if (!file) return;
+              this.appState.customGraphicName = file.name;
+              badge.textContent = file.name;
+              statusLabel.textContent = `Logo: ${file.name}`;
+
+              if (file.name.toLowerCase().endsWith('.svg') || file.type === 'image/svg+xml') {
+                this.appState.customSvgText = await file.text();
+                this.currentParams.graphicSource = 'svg-upload';
+                this.rebuild3DModel();
+              } else {
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                  const img = new Image();
+                  img.onload = () => {
+                    this.appState.customRasterImage = img;
+                    this.currentParams.graphicSource = 'raster-upload';
+                    this.rebuild3DModel();
+                  };
+                  img.src = ev.target.result;
+                };
+                reader.readAsDataURL(file);
+              }
+            });
+
+            this.controlsContainer.appendChild(box);
+            return;
+          }
+
+          if (item.type === 'map-picker-button') {
+            const elev = this.appState.mapData.elevationGrid;
+            const elevInfo = elev ? `Δ Quota: ${Math.round(elev.maxElev - elev.minElev)}m` : '';
+            const box = document.createElement('div');
+            box.className = 'p-3 rounded-xl bg-blue-950/40 border border-blue-500/30 space-y-2';
+            box.innerHTML = `
+              <div class="flex items-center justify-between text-xs">
+                <span class="font-semibold text-blue-200">${this.appState.mapData.sourceName}</span>
+                <span class="font-mono text-[11px] text-emerald-400">${elevInfo}</span>
+              </div>
+              <button type="button" id="btn-open-map-picker" class="w-full py-2 px-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white flex items-center justify-center gap-2 shadow transition">
+                <i data-lucide="columns-2" class="w-4 h-4"></i>
+                Mostra/Nascondi Mappa 2D Affiancata
+              </button>
+            `;
+            box.querySelector('#btn-open-map-picker').addEventListener('click', () => this.toggleSplitMapDrawer());
+            this.controlsContainer.appendChild(box);
+            return;
+          }
+
+          if (item.type === 'text') {
+            const val = this.currentParams[item.key] ?? '';
+            const div = document.createElement('div');
+            div.className = 'space-y-1';
+            div.innerHTML = `
+              <label class="block text-xs text-gray-300">${item.label}</label>
+              <input type="text" value="${val}" placeholder="${item.placeholder || ''}"
+                class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500" />
+            `;
+            div.querySelector('input').addEventListener('input', (e) => {
+              this.currentParams[item.key] = e.target.value;
+              this.rebuild3DModel();
+            });
+            this.controlsContainer.appendChild(div);
+            return;
+          }
+
+          if (item.type === 'file-audio') {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'p-3 rounded-xl bg-gray-800/70 border border-gray-700/80 space-y-2';
+            wrapper.innerHTML = `
+              <label class="block text-xs font-semibold text-gray-200">${item.label}</label>
+              <input type="file" accept="audio/*" class="block w-full text-xs text-gray-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor-pointer" />
+            `;
+            wrapper.querySelector('input').addEventListener('change', async (e) => {
+              const file = e.target.files[0];
+              if (!file) return;
+              const arrayBuffer = await file.arrayBuffer();
+              const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+              const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+              this.appState.rawAudioChannelData = audioBuffer.getChannelData(0);
+              this.appState.audioFileName = file.name;
+              statusLabel.textContent = file.name;
+              this.rebuild3DModel();
+            });
+            this.controlsContainer.appendChild(wrapper);
+            return;
+          }
+
+          if (item.type === 'range') {
+            const val = this.currentParams[item.key];
+            const div = document.createElement('div');
+            div.className = 'space-y-1';
+            div.innerHTML = `
+              <div class="flex justify-between text-xs">
+                <label class="text-gray-300">${item.label}</label>
+                <span class="font-mono text-blue-400 font-semibold" id="val-${item.key}">${val}${item.unit}</span>
+              </div>
+              <input type="range" min="${item.min}" max="${item.max}" step="${item.step}" value="${val}"
+                class="w-full h-1.5 bg-gray-800 rounded-lg appearance-none cursor-pointer" />
+            `;
+            const input = div.querySelector('input');
+            const valSpan = div.querySelector(`#val-${item.key}`);
+            input.addEventListener('input', (e) => {
+              this.currentParams[item.key] = parseFloat(e.target.value);
+              valSpan.textContent = `${e.target.value}${item.unit}`;
+              this.updateMapCropFrameShape();
+              this.rebuild3DModel();
+            });
+            this.controlsContainer.appendChild(div);
+            return;
+          }
+
+          if (item.type === 'select') {
+            const val = this.currentParams[item.key];
+            const div = document.createElement('div');
+            div.className = 'space-y-1';
+            const optionsHtml = item.options.map(opt => `<option value="${opt.value}" ${opt.value === val ? 'selected' : ''}>${opt.label}</option>`).join('');
+            div.innerHTML = `
+              <label class="block text-xs text-gray-300">${item.label}</label>
+              <select class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500">
+                ${optionsHtml}
+              </select>
+            `;
+            div.querySelector('select').addEventListener('change', (e) => {
+              this.currentParams[item.key] = e.target.value;
+              if (item.key === 'presetIcon') {
+                this.currentParams.graphicSource = 'preset';
+                this.appState.customGraphicName = `Icona: ${e.target.value}`;
+                const badge = document.getElementById('graphic-source-badge');
+                if (badge) badge.textContent = this.appState.customGraphicName;
+              }
+              this.updateMapCropFrameShape();
+              this.rebuild3DModel();
+            });
+            this.controlsContainer.appendChild(div);
+            return;
+          }
+
+          if (item.type === 'checkbox') {
+            const val = this.currentParams[item.key];
+            const div = document.createElement('label');
+            div.className = 'flex items-center justify-between py-0.5 cursor-pointer';
+            div.innerHTML = `
+              <span class="text-xs text-gray-300 font-medium">${item.label}</span>
+              <input type="checkbox" ${val ? 'checked' : ''} class="w-4 h-4 rounded accent-blue-600 cursor-pointer" />
+            `;
+            div.querySelector('input').addEventListener('change', (e) => {
+              this.currentParams[item.key] = e.target.checked;
+              this.rebuild3DModel();
+            });
+            this.controlsContainer.appendChild(div);
+            return;
+          }
+
+          if (item.type === 'color') {
+            const val = this.currentParams[item.key];
+            const div = document.createElement('div');
+            div.className = 'flex items-center justify-between';
+            div.innerHTML = `
+              <label class="text-xs text-gray-300">${item.label}</label>
+              <input type="color" value="${val}" class="w-7 h-7 rounded cursor-pointer bg-transparent border-0" />
+            `;
+            div.querySelector('input').addEventListener('input', (e) => {
+              this.currentParams[item.key] = e.target.value;
+              this.rebuild3DModel();
+            });
+            this.controlsContainer.appendChild(div);
+          }
+        });
+      }
+
+      rebuild3DModel() {
+        if (!this.activeTool || !this.scene) return;
+
+        if (this.currentMesh) {
+          this.scene.remove(this.currentMesh);
+          this.currentMesh.traverse(child => {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) child.material.dispose();
+          });
+        }
+
+        this.currentMesh = this.activeTool.buildGeometry(this.currentParams, this.appState);
+        this.scene.add(this.currentMesh);
+
+        const box = new THREE.Box3().setFromObject(this.currentMesh);
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        this.bboxInfo.textContent = `${size.x.toFixed(1)} × ${size.z.toFixed(1)} × ${size.y.toFixed(1)} mm`;
+      }
+
+      exportSingleSTL() {
+        if (!this.currentMesh) return;
+        const clone = this.currentMesh.clone(true);
+        clone.traverse(child => {
+          if (child.isMesh && child.geometry) {
+            child.geometry = child.geometry.clone();
+            child.geometry.rotateX(Math.PI / 2);
+          }
+        });
+        clone.updateMatrixWorld(true);
+        const exporter = new STLExporter();
+        this.triggerDownload(exporter.parse(clone, { binary: true }), `${this.activeTool.id}_completo.stl`);
+      }
+
+      exportMultiColorSTL() {
+        if (!this.currentMesh) return;
+        const exporter = new STLExporter();
+        this.currentMesh.children.forEach((partMesh, idx) => {
+          if (!partMesh.isMesh) return;
+          const tempMesh = partMesh.clone();
+          tempMesh.geometry = partMesh.geometry.clone();
+          tempMesh.geometry.rotateX(Math.PI / 2);
+          tempMesh.updateMatrixWorld(true);
+          const stlBuffer = exporter.parse(tempMesh, { binary: true });
+          const partName = partMesh.name || `parte_${idx}`;
+          setTimeout(() => {
+            this.triggerDownload(stlBuffer, `${this.activeTool.id}_${partName}.stl`);
+          }, idx * 240);
+        });
+      }
+
+      triggerDownload(buffer, filename) {
+        const blob = new Blob([buffer], { type: 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename; a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      initEvents() {
+        document.getElementById('btn-reset-params').addEventListener('click', () => {
+          if (!this.activeTool) return;
+          this.currentParams = { ...this.activeTool.defaultParams };
+          this.buildSidebarControls(this.activeTool);
+          this.rebuild3DModel();
+        });
+
+        document.getElementById('btn-view-top').addEventListener('click', () => {
+          this.camera.position.set(0, 145, 0.1);
+          this.controls.target.set(0, 0, 0);
+          this.controls.update();
+        });
+
+        document.getElementById('btn-reset-camera').addEventListener('click', () => {
+          this.camera.position.set(0, 105, 115);
+          this.controls.target.set(0, 2, 0);
+          this.controls.update();
+        });
+
+        document.getElementById('btn-export-stl').addEventListener('click', () => this.exportSingleSTL());
+        this.btnExportMulti.addEventListener('click', () => this.exportMultiColorSTL());
+
+        document.getElementById('btn-close-map-modal').addEventListener('click', () => this.toggleSplitMapDrawer(false));
+
+        const searchInput = document.getElementById('map-search-input');
+        const runSearch = async () => {
+          const q = searchInput.value.trim();
+          if (!q || !this.leafletMap) return;
+          const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}`);
+          const data = await res.json();
+          if (data && data.length > 0) {
+            this.leafletMap.setView([parseFloat(data[0].lat), parseFloat(data[0].lon)], 15);
+            const shortName = data[0].display_name.split(',')[0].toUpperCase();
+            if (this.currentParams.plaqueText !== undefined) this.currentParams.plaqueText = shortName;
+          }
+        };
+        document.getElementById('btn-map-search').addEventListener('click', runSearch);
+        searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') runSearch(); });
+
+        document.getElementById('btn-load-demo-city').addEventListener('click', () => {
+          this.appState.mapData = Map3DEngine.generateDemoCityData();
+          this.currentParams.plaqueText = 'TORINO';
+          this.currentParams.plaqueSubtext = this.appState.mapData.coordsLabel;
+          this.buildSidebarControls(this.activeTool);
+          this.rebuild3DModel();
+        });
+
+        document.getElementById('btn-fetch-osm-data').addEventListener('click', async () => {
+          if (!this.leafletMap) return;
+          const statusEl = document.getElementById('osm-fetch-status');
+          const btn = document.getElementById('btn-fetch-osm-data');
+          try {
+            btn.disabled = true;
+            statusEl.innerHTML = `<span class="text-amber-400 font-semibold">Scaricamento vettori OSM + DEM in corso...</span>`;
+            const mapRect = document.getElementById('leaflet-map').getBoundingClientRect();
+            const frameRect = document.getElementById('map-crop-frame').getBoundingClientRect();
+            const nwLatLng = this.leafletMap.containerPointToLatLng(L.point(frameRect.left - mapRect.left, frameRect.top - mapRect.top));
+            const seLatLng = this.leafletMap.containerPointToLatLng(L.point(frameRect.right - mapRect.left, frameRect.bottom - mapRect.top));
+            const osmData = await Map3DEngine.fetchOSMData(L.latLngBounds(nwLatLng, seLatLng));
+            this.appState.mapData = osmData;
+            if (osmData.coordsLabel) this.currentParams.plaqueSubtext = osmData.coordsLabel;
+            statusEl.innerHTML = `<span class="text-emerald-400">Aggiornato: ${osmData.buildings.length} edifici e DEM!</span>`;
+            this.buildSidebarControls(this.activeTool);
+            this.rebuild3DModel();
+          } catch (err) {
+            statusEl.innerHTML = `<span class="text-red-400">Area troppo estesa o server occupato: zooma di più.</span>`;
+          } finally {
+            btn.disabled = false;
+          }
+        });
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      new MakerStudioApp();
+    });
+  </script>
+</body>
+</html>
